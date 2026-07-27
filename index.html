@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RunGate Cash — Portfolio Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind (Play CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Safelist the dynamically-built accent color classes so they survive
+    // runtime theme switches (Tailwind JIT can't see string-interpolated classes).
+    (function () {
+      const accents = ["blue", "violet", "emerald", "rose", "amber", "teal", "indigo", "orange"];
+      const safelist = [];
+      accents.forEach(function (a) {
+        safelist.push(
+          "bg-" + a + "-600", "hover:bg-" + a + "-700",
+          "text-" + a + "-300", "text-" + a + "-700", "text-" + a + "-600",
+          "bg-" + a + "-950", "bg-" + a + "-50",
+          "border-" + a + "-800", "border-" + a + "-200",
+          "focus:ring-" + a + "-200", "bg-" + a + "-500"
+        );
+      });
+      window.tailwind = window.tailwind || {};
+      tailwind.config = { safelist: safelist };
+    })();
+  </script>
+
+  <!-- React + libraries (UMD builds) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js"></script>
+  <script crossorigin src="https://unpkg.com/lucide-react@0.383.0/dist/umd/lucide-react.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    html, body, #root { height: 100%; }
+    body { margin: 0; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+// Pull hooks/components off the UMD globals instead of ES imports.
+const { useState, useMemo, createContext, useContext } = React;
+const {
+  LayoutDashboard, Layers, Flag, Film, Wallet, TrendingUp, CalendarClock,
+  Plus, Search, Moon, Sun, ChevronRight, CheckCircle2, Clock, AlertTriangle,
+  DollarSign, Users, Target, ArrowUpRight, ArrowDownRight, Palette, Check
+} = LucideReact;
+const {
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend
+} = Recharts;
+
+// ---------------------------------------------------------------------------
+// Theme system
+// ---------------------------------------------------------------------------
+
+const ACCENTS = [
+  { key: "blue", label: "Blue", hex: "#2563eb" },
+  { key: "violet", label: "Violet", hex: "#7c3aed" },
+  { key: "emerald", label: "Emerald", hex: "#059669" },
+  { key: "rose", label: "Rose", hex: "#e11d48" },
+  { key: "amber", label: "Amber", hex: "#d97706" },
+  { key: "teal", label: "Teal", hex: "#0d9488" },
+  { key: "indigo", label: "Indigo", hex: "#4f46e5" },
+  { key: "orange", label: "Orange", hex: "#ea580c" },
+];
+
+const ThemeContext = createContext(null);
+const useTheme = () => useContext(ThemeContext);
+
+function buildTokens(isDark, accentKey) {
+  const a = accentKey;
+  return {
+    isDark,
+    accentKey: a,
+    accentHex: ACCENTS.find((x) => x.key === a).hex,
+    page: isDark ? "bg-slate-950" : "bg-slate-50",
+    text: isDark ? "text-slate-100" : "text-slate-800",
+    textMuted: isDark ? "text-slate-400" : "text-slate-500",
+    textFaint: isDark ? "text-slate-500" : "text-slate-400",
+    cardBg: isDark ? "bg-slate-900/80" : "bg-white/80",
+    border: isDark ? "border-slate-800" : "border-slate-200",
+    borderLight: isDark ? "border-slate-800" : "border-slate-100",
+    hover: isDark ? "hover:bg-slate-800/60" : "hover:bg-slate-50/60",
+    inputBg: isDark ? "bg-slate-800" : "bg-slate-50",
+    sidebarBg: isDark ? "bg-slate-900" : "bg-white",
+    headerBg: isDark ? "bg-slate-900/80" : "bg-white/80",
+    theadBg: isDark ? "bg-slate-800/50" : "bg-slate-50/80",
+    chipBg: isDark ? "bg-slate-800" : "bg-slate-100",
+    // accent-derived (built from literal shade classes so they stay core utilities)
+    accentSolid: `bg-${a}-600`,
+    accentSolidHover: `hover:bg-${a}-700`,
+    accentText: isDark ? `text-${a}-300` : `text-${a}-700`,
+    accentTextSolid: `text-${a}-600`,
+    accentLightBg: isDark ? `bg-${a}-950` : `bg-${a}-50`,
+    accentBorder: isDark ? `border-${a}-800` : `border-${a}-200`,
+    accentRing: `focus:ring-${a}-200`,
+    accentDot: `bg-${a}-500`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sample data
+// ---------------------------------------------------------------------------
+
+const ASSETS = [
+  { name: "Asset 01", managedBy: "Maria", page: "Northside Home Tips", portfolio: "Main BM", setup: "2026-05-02", cost: 45, onboarding: "Complete", account: "Active" },
+  { name: "Asset 02", managedBy: "Maria", page: "Coastal Kitchen Co.", portfolio: "Main BM", setup: "2026-05-02", cost: 45, onboarding: "Complete", account: "Active" },
+  { name: "Asset 03", managedBy: "Diego", page: "Urban Plant Corner", portfolio: "Main BM", setup: "2026-05-04", cost: 40, onboarding: "Complete", account: "Active" },
+  { name: "Asset 04", managedBy: "Diego", page: "Fit & Fresh Meals", portfolio: "Main BM", setup: "2026-05-04", cost: 40, onboarding: "Warming Up", account: "Active" },
+  { name: "Asset 05", managedBy: "Aiko", page: "Weekend Wanderers", portfolio: "Secondary BM", setup: "2026-05-09", cost: 50, onboarding: "Warming Up", account: "Active" },
+  { name: "Asset 06", managedBy: "Aiko", page: "Petcare Daily", portfolio: "Secondary BM", setup: "2026-05-09", cost: 50, onboarding: "Warming Up", account: "Active" },
+  { name: "Asset 07", managedBy: "Sam", page: "DIY Garage Projects", portfolio: "Secondary BM", setup: "2026-05-12", cost: 42, onboarding: "Pending Review", account: "In Review" },
+  { name: "Asset 08", managedBy: "Sam", page: "Budget Beauty Finds", portfolio: "Secondary BM", setup: "2026-05-12", cost: 42, onboarding: "Pending Review", account: "Active" },
+  { name: "Asset 09", managedBy: "Priya", page: "Family Finance 101", portfolio: "Main BM", setup: "2026-05-15", cost: 48, onboarding: "Complete", account: "Active" },
+  { name: "Asset 10", managedBy: "Priya", page: "Small Space Style", portfolio: "Main BM", setup: "2026-05-15", cost: 48, onboarding: "Complete", account: "Active" },
+];
+
+const PAGES = [
+  { name: "Northside Home Tips", category: "Home & Garden", niche: "Home organization", followers: 4200, created: "2026-05-03", rec: "Recommended", monetization: "Eligible", revenue: 310, status: "Active" },
+  { name: "Coastal Kitchen Co.", category: "Food", niche: "Coastal recipes", followers: 3800, created: "2026-05-03", rec: "Recommended", monetization: "Eligible", revenue: 275, status: "Active" },
+  { name: "Urban Plant Corner", category: "Home & Garden", niche: "Houseplants", followers: 2950, created: "2026-05-05", rec: "Standard", monetization: "In Review", revenue: 90, status: "Active" },
+  { name: "Fit & Fresh Meals", category: "Health", niche: "Meal prep", followers: 3100, created: "2026-05-05", rec: "Standard", monetization: "In Review", revenue: 60, status: "Active" },
+  { name: "Weekend Wanderers", category: "Travel", niche: "Road trips", followers: 1800, created: "2026-05-10", rec: "Standard", monetization: "Not Eligible", revenue: 0, status: "Active" },
+  { name: "Petcare Daily", category: "Pets", niche: "Dog care", followers: 2200, created: "2026-05-10", rec: "Standard", monetization: "Not Eligible", revenue: 0, status: "Active" },
+  { name: "DIY Garage Projects", category: "Hobbies", niche: "Woodworking", followers: 1250, created: "2026-05-13", rec: "In Review", monetization: "Not Eligible", revenue: 0, status: "In Review" },
+  { name: "Budget Beauty Finds", category: "Beauty", niche: "Drugstore beauty", followers: 1600, created: "2026-05-13", rec: "Standard", monetization: "Not Eligible", revenue: 0, status: "Active" },
+  { name: "Family Finance 101", category: "Finance", niche: "Household budgeting", followers: 3650, created: "2026-05-16", rec: "Recommended", monetization: "Eligible", revenue: 240, status: "Active" },
+  { name: "Small Space Style", category: "Home & Garden", niche: "Apartment decor", followers: 2900, created: "2026-05-16", rec: "Standard", monetization: "Eligible", revenue: 130, status: "Active" },
+];
+
+const BUDGET = [
+  { item: "Business Manager verification", qty: 2, unit: 0, category: "Setup", paid: "Yes", supplier: "Meta", notes: "One-time" },
+  { item: "Ad creative template pack", qty: 1, unit: 180, category: "Content", paid: "Yes", supplier: "Freelancer", notes: "Reusable across pages" },
+  { item: "Stock footage subscription", qty: 1, unit: 39, category: "Content", paid: "Yes", supplier: "Storyblocks", notes: "Monthly" },
+  { item: "Scheduling tool", qty: 1, unit: 25, category: "Tools", paid: "Yes", supplier: "Buffer", notes: "Monthly" },
+  { item: "Analytics dashboard tool", qty: 1, unit: 49, category: "Tools", paid: "No", supplier: "Metricool", notes: "Pending renewal" },
+  { item: "Freelance video editor", qty: 20, unit: 12, category: "Labor", paid: "Yes", supplier: "Upwork", notes: "Per video" },
+  { item: "Freelance copywriter", qty: 10, unit: 15, category: "Labor", paid: "Yes", supplier: "Upwork", notes: "Per caption set" },
+  { item: "Ad spend — trial campaigns", qty: 1, unit: 400, category: "Ads", paid: "Yes", supplier: "Meta Ads", notes: "Across 4 pages" },
+];
+
+const CONTENT_COLUMNS = ["Idea", "Script", "Production", "Editing", "Ready", "Scheduled", "Published"];
+const CONTENT_CARDS = [
+  { page: "Northside Home Tips", type: "Reel", editor: "Maria", publish: "Jul 29", cost: 15, col: "Published" },
+  { page: "Coastal Kitchen Co.", type: "Carousel", editor: "Maria", publish: "Jul 30", cost: 10, col: "Published" },
+  { page: "Urban Plant Corner", type: "Reel", editor: "Diego", publish: "Aug 1", cost: 15, col: "Scheduled" },
+  { page: "Fit & Fresh Meals", type: "Reel", editor: "Diego", publish: "Aug 2", cost: 15, col: "Scheduled" },
+  { page: "Weekend Wanderers", type: "Photo post", editor: "Aiko", publish: "Aug 3", cost: 8, col: "Ready" },
+  { page: "Petcare Daily", type: "Reel", editor: "Aiko", publish: "Aug 4", cost: 15, col: "Editing" },
+  { page: "DIY Garage Projects", type: "Carousel", editor: "Sam", publish: "Aug 5", cost: 10, col: "Editing" },
+  { page: "Budget Beauty Finds", type: "Reel", editor: "Sam", publish: "Aug 6", cost: 15, col: "Production" },
+  { page: "Family Finance 101", type: "Carousel", editor: "Priya", publish: "Aug 7", cost: 10, col: "Production" },
+  { page: "Small Space Style", type: "Reel", editor: "Priya", publish: "Aug 8", cost: 15, col: "Script" },
+  { page: "Northside Home Tips", type: "Photo post", editor: "Maria", publish: "Aug 9", cost: 8, col: "Script" },
+  { page: "Coastal Kitchen Co.", type: "Reel", editor: "Maria", publish: "Aug 10", cost: 15, col: "Idea" },
+  { page: "Family Finance 101", type: "Reel", editor: "Priya", publish: "Aug 11", cost: 15, col: "Idea" },
+];
+
+const REVENUE_TREND = [
+  { month: "Mar", investment: 480, revenue: 0, roi: -100 },
+  { month: "Apr", investment: 890, revenue: 40, roi: -95 },
+  { month: "May", investment: 1340, revenue: 180, roi: -87 },
+  { month: "Jun", investment: 1680, revenue: 520, roi: -69 },
+  { month: "Jul", investment: 1950, revenue: 1105, roi: -43 },
+];
+
+const REVENUE_TABLE = [
+  { page: "Northside Home Tips", month: "Jul 2026", revenue: 310, expenses: 60 },
+  { page: "Coastal Kitchen Co.", month: "Jul 2026", revenue: 275, expenses: 55 },
+  { page: "Urban Plant Corner", month: "Jul 2026", revenue: 90, expenses: 48 },
+  { page: "Fit & Fresh Meals", month: "Jul 2026", revenue: 60, expenses: 48 },
+  { page: "Family Finance 101", month: "Jul 2026", revenue: 240, expenses: 58 },
+  { page: "Small Space Style", month: "Jul 2026", revenue: 130, expenses: 52 },
+];
+
+const STATUS_OVERVIEW = [
+  { name: "Active", value: 8, color: "#22c55e" },
+  { name: "Warming Up", value: 1, color: "#facc15" },
+  { name: "In Review", value: 1, color: "#ef4444" },
+];
+
+const TIMELINE = [
+  { milestone: "Purchase Assets", target: "May 2, 2026", status: "Done" },
+  { milestone: "Warm-up / Growth Phase", target: "May 16, 2026", status: "Done" },
+  { milestone: "Posting Start", target: "May 23, 2026", status: "Done" },
+  { milestone: "Monetization Applied", target: "Jun 20, 2026", status: "Done" },
+  { milestone: "First Revenue", target: "Jul 1, 2026", status: "Done" },
+  { milestone: "Break-even", target: "Sep 15, 2026", status: "In Progress" },
+  { milestone: "Scale to 20 Pages", target: "Dec 1, 2026", status: "Not Started" },
+];
+
+const NAV = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "assets", label: "Assets", icon: Layers },
+  { id: "pages", label: "Facebook Pages", icon: Flag },
+  { id: "content", label: "Content", icon: Film },
+  { id: "budget", label: "Budget", icon: Wallet },
+  { id: "revenue", label: "Revenue", icon: TrendingUp },
+  { id: "timeline", label: "Timeline", icon: CalendarClock },
+];
+
+// ---------------------------------------------------------------------------
+// Helpers / shared components
+// ---------------------------------------------------------------------------
+
+const money = (n) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+function StatusBadge({ status }) {
+  const map = {
+    Active: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    "In Review": "bg-amber-50 text-amber-700 border-amber-200",
+    "Warming Up": "bg-amber-50 text-amber-700 border-amber-200",
+    "Pending Review": "bg-amber-50 text-amber-700 border-amber-200",
+    Complete: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    Recommended: "bg-sky-50 text-sky-700 border-sky-200",
+    Standard: "bg-slate-100 text-slate-600 border-slate-200",
+    Eligible: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    "Not Eligible": "bg-slate-100 text-slate-500 border-slate-200",
+    Done: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    "In Progress": "bg-sky-50 text-sky-700 border-sky-200",
+    "Not Started": "bg-slate-100 text-slate-500 border-slate-200",
+  };
+  return (
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${map[status] || "bg-slate-100 text-slate-600 border-slate-200"}`}>
+      {status}
+    </span>
+  );
+}
+
+function Card({ children, className = "" }) {
+  const t = useTheme();
+  return (
+    <div className={`${t.cardBg} backdrop-blur-sm border ${t.border} rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function StatCard({ label, value, delta, deltaDir, icon: Icon }) {
+  const t = useTheme();
+  return (
+    <Card className="p-5 relative overflow-hidden group">
+      <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-10 ${t.accentSolid} transition-transform duration-500 group-hover:scale-125`} />
+      <div className="flex items-start justify-between">
+        <div>
+          <p className={`text-xs font-medium ${t.textMuted} mb-2`}>{label}</p>
+          <p className={`text-2xl font-semibold ${t.text} tracking-tight`}>{value}</p>
+        </div>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${t.accentLightBg}`}>
+          <Icon className={`w-5 h-5 ${t.accentTextSolid}`} strokeWidth={2} />
+        </div>
+      </div>
+      {delta && (
+        <div className={`mt-3 flex items-center gap-1 text-xs font-medium ${deltaDir === "up" ? "text-emerald-600" : "text-red-500"}`}>
+          {deltaDir === "up" ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
+          {delta}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function SectionHeader({ title, subtitle, action }) {
+  const t = useTheme();
+  return (
+    <div className="flex items-center justify-between mb-5">
+      <div>
+        <h2 className={`text-lg font-semibold ${t.text}`}>{title}</h2>
+        {subtitle && <p className={`text-sm ${t.textMuted} mt-0.5`}>{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function PrimaryButton({ children, icon: Icon = Plus }) {
+  const t = useTheme();
+  return (
+    <button className={`inline-flex items-center gap-1.5 ${t.accentSolid} ${t.accentSolidHover} text-white text-sm font-medium px-4 py-2 rounded-xl shadow-sm transition-colors duration-200`}>
+      <Icon className="w-4 h-4" />
+      {children}
+    </button>
+  );
+}
+
+function Th({ children }) {
+  const t = useTheme();
+  return <th className={`text-left text-xs font-semibold ${t.textMuted} uppercase tracking-wide px-4 py-3 whitespace-nowrap`}>{children}</th>;
+}
+function Td({ children, className = "" }) {
+  const t = useTheme();
+  return <td className={`px-4 py-3 text-sm ${t.text} whitespace-nowrap ${className}`}>{children}</td>;
+}
+
+// ---------------------------------------------------------------------------
+// Views
+// ---------------------------------------------------------------------------
+
+function DashboardView() {
+  const t = useTheme();
+  const totalInvestment = ASSETS.reduce((s, a) => s + a.cost, 0) + BUDGET.reduce((s, b) => s + b.qty * b.unit, 0);
+  const totalRevenue = PAGES.reduce((s, p) => s + p.revenue, 0);
+  const netProfit = totalRevenue - REVENUE_TABLE.reduce((s, r) => s + r.expenses, 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="Total Assets" value={ASSETS.length} icon={Layers} />
+        <StatCard label="Total Pages" value={PAGES.length} icon={Flag} />
+        <StatCard label="Total Investment" value={money(totalInvestment)} icon={DollarSign} delta="+$270 this month" deltaDir="down" />
+        <StatCard label="Monthly Revenue" value={money(totalRevenue)} icon={TrendingUp} delta="+112% vs last month" deltaDir="up" />
+        <StatCard label="Net Profit (MTD)" value={money(netProfit)} icon={Target} />
+        <StatCard label="ROI to Date" value="-43%" icon={ArrowUpRight} delta="Trending toward break-even" deltaDir="up" />
+        <StatCard label="Pages Ready to Monetize" value="4" icon={CheckCircle2} />
+        <StatCard label="Est. Break-even" value="Sep 2026" icon={Clock} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Card className="p-5 lg:col-span-2">
+          <SectionHeader title="Investment vs. Revenue" subtitle="Cumulative, last 5 months" />
+          <ResponsiveContainer width="100%" height={260}>
+            <AreaChart data={REVENUE_TREND}>
+              <defs>
+                <linearGradient id="inv" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={t.accentHex} stopOpacity={0.28} />
+                  <stop offset="100%" stopColor={t.accentHex} stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#22c55e" stopOpacity={0.3} />
+                  <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={t.isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
+              <XAxis dataKey="month" tick={{ fontSize: 12, fill: t.isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 12, fill: t.isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
+              <Tooltip formatter={(v) => money(v)} contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} />
+              <Area type="monotone" dataKey="investment" stroke={t.accentHex} fill="url(#inv)" strokeWidth={2} name="Investment" />
+              <Area type="monotone" dataKey="revenue" stroke="#22c55e" fill="url(#rev)" strokeWidth={2} name="Revenue" />
+              <Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card className="p-5">
+          <SectionHeader title="Page Status" />
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={STATUS_OVERVIEW} dataKey="value" nameKey="name" innerRadius={55} outerRadius={80} paddingAngle={3}>
+                {STATUS_OVERVIEW.map((s, i) => <Cell key={i} fill={s.color} />)}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="space-y-2 mt-2">
+            {STATUS_OVERVIEW.map((s) => (
+              <div key={s.name} className="flex items-center justify-between text-sm">
+                <span className={`flex items-center gap-2 ${t.textMuted}`}>
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                  {s.name}
+                </span>
+                <span className={`font-medium ${t.text}`}>{s.value}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Card className="p-5 lg:col-span-2">
+          <SectionHeader title="ROI Trend" subtitle="Improving as pages reach monetization" />
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={REVENUE_TREND}>
+              <CartesianGrid strokeDasharray="3 3" stroke={t.isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
+              <XAxis dataKey="month" tick={{ fontSize: 12, fill: t.isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 12, fill: t.isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} />
+              <Tooltip formatter={(v) => `${v}%`} contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} />
+              <Bar dataKey="roi" fill={t.accentHex} radius={[6, 6, 0, 0]} name="ROI %" />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card className="p-5">
+          <SectionHeader title="Quick Actions" />
+          <div className="grid grid-cols-2 gap-3">
+            {["Add Asset", "Add Page", "New Investment", "New Content"].map((label) => (
+              <button key={label} className={`flex flex-col items-start gap-2 p-3 rounded-xl border ${t.border} ${t.hover} transition-colors text-left`}>
+                <Plus className={`w-4 h-4 ${t.accentTextSolid}`} />
+                <span className={`text-xs font-medium ${t.text}`}>{label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mt-5">
+            <p className={`text-xs font-semibold ${t.textMuted} uppercase tracking-wide mb-3`}>Recent Activity</p>
+            <ul className="space-y-3 text-sm">
+              <li className="flex gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" /><span className={t.textMuted}><b className={t.text}>Family Finance 101</b> approved for monetization</span></li>
+              <li className="flex gap-2"><Film className={`w-4 h-4 ${t.accentTextSolid} mt-0.5 flex-shrink-0`} /><span className={t.textMuted}>3 reels scheduled for <b className={t.text}>Northside Home Tips</b></span></li>
+              <li className="flex gap-2"><AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" /><span className={t.textMuted}><b className={t.text}>DIY Garage Projects</b> pending review</span></li>
+            </ul>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function AssetsView() {
+  const t = useTheme();
+  return (
+    <Card className="overflow-hidden">
+      <div className={`p-5 flex items-center justify-between border-b ${t.borderLight}`}>
+        <SectionHeader title="Assets" subtitle={`${ASSETS.length} Page assets across the portfolio`} />
+        <PrimaryButton>Add Asset</PrimaryButton>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className={t.theadBg}>
+            <tr>
+              <Th>Asset Name</Th><Th>Managed By</Th><Th>Facebook Page</Th><Th>Business Portfolio</Th>
+              <Th>Setup Date</Th><Th>Cost</Th><Th>Onboarding</Th><Th>Account Status</Th>
+            </tr>
+          </thead>
+          <tbody className={`divide-y ${t.borderLight}`}>
+            {ASSETS.map((a) => (
+              <tr key={a.name} className={`${t.hover} transition-colors`}>
+                <Td className="font-medium">{a.name}</Td>
+                <Td>{a.managedBy}</Td>
+                <Td>{a.page}</Td>
+                <Td>{a.portfolio}</Td>
+                <Td>{a.setup}</Td>
+                <Td>{money(a.cost)}</Td>
+                <Td><StatusBadge status={a.onboarding} /></Td>
+                <Td><StatusBadge status={a.account} /></Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function PagesView() {
+  const t = useTheme();
+  return (
+    <Card className="overflow-hidden">
+      <div className={`p-5 flex items-center justify-between border-b ${t.borderLight}`}>
+        <SectionHeader title="Facebook Pages" subtitle={`${PAGES.length} live Pages`} />
+        <PrimaryButton>Add Page</PrimaryButton>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className={t.theadBg}>
+            <tr>
+              <Th>Page Name</Th><Th>Category</Th><Th>Niche</Th><Th>Followers</Th>
+              <Th>Created</Th><Th>Recommendation</Th><Th>Monetization</Th><Th>Revenue</Th>
+            </tr>
+          </thead>
+          <tbody className={`divide-y ${t.borderLight}`}>
+            {PAGES.map((p) => (
+              <tr key={p.name} className={`${t.hover} transition-colors`}>
+                <Td className="font-medium">{p.name}</Td>
+                <Td>{p.category}</Td>
+                <Td className={t.textMuted}>{p.niche}</Td>
+                <Td>{p.followers.toLocaleString()}</Td>
+                <Td>{p.created}</Td>
+                <Td><StatusBadge status={p.rec} /></Td>
+                <Td><StatusBadge status={p.monetization} /></Td>
+                <Td className="font-medium">{money(p.revenue)}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function BudgetView() {
+  const t = useTheme();
+  const total = BUDGET.reduce((s, b) => s + b.qty * b.unit, 0);
+  return (
+    <Card className="overflow-hidden">
+      <div className={`p-5 flex items-center justify-between border-b ${t.borderLight}`}>
+        <SectionHeader title="Budget Tracker" subtitle={`Total spend: ${money(total)}`} />
+        <PrimaryButton>Add Item</PrimaryButton>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className={t.theadBg}>
+            <tr>
+              <Th>Item</Th><Th>Qty</Th><Th>Unit Cost</Th><Th>Total Cost</Th>
+              <Th>Category</Th><Th>Paid</Th><Th>Supplier</Th><Th>Notes</Th>
+            </tr>
+          </thead>
+          <tbody className={`divide-y ${t.borderLight}`}>
+            {BUDGET.map((b) => (
+              <tr key={b.item} className={`${t.hover} transition-colors`}>
+                <Td className="font-medium">{b.item}</Td>
+                <Td>{b.qty}</Td>
+                <Td>{money(b.unit)}</Td>
+                <Td className="font-medium">{money(b.qty * b.unit)}</Td>
+                <Td>{b.category}</Td>
+                <Td><StatusBadge status={b.paid === "Yes" ? "Active" : "In Review"} /></Td>
+                <Td className={t.textMuted}>{b.supplier}</Td>
+                <Td className={t.textMuted}>{b.notes}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function ContentView() {
+  const t = useTheme();
+  return (
+    <div>
+      <SectionHeader title="Content Production" subtitle="Drag-and-drop pipeline across all Pages" action={<PrimaryButton>New Content</PrimaryButton>} />
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {CONTENT_COLUMNS.map((col) => {
+          const cards = CONTENT_CARDS.filter((c) => c.col === col);
+          return (
+            <div key={col} className="flex-shrink-0 w-64">
+              <div className="flex items-center justify-between mb-3 px-1">
+                <span className={`text-xs font-semibold ${t.textMuted} uppercase tracking-wide`}>{col}</span>
+                <span className={`text-xs ${t.chipBg} ${t.textMuted} rounded-full px-2 py-0.5`}>{cards.length}</span>
+              </div>
+              <div className="space-y-3">
+                {cards.map((c, i) => (
+                  <Card key={i} className="p-3.5 cursor-grab">
+                    <p className={`text-sm font-medium ${t.text} mb-1`}>{c.page}</p>
+                    <p className={`text-xs ${t.textMuted} mb-3`}>{c.type} &middot; {c.editor}</p>
+                    <div className={`flex items-center justify-between text-xs ${t.textFaint}`}>
+                      <span>{c.publish}</span>
+                      <span className={`font-medium ${t.textMuted}`}>{money(c.cost)}</span>
+                    </div>
+                  </Card>
+                ))}
+                {cards.length === 0 && (
+                  <div className={`border-2 border-dashed ${t.border} rounded-xl h-16 flex items-center justify-center text-xs ${t.textFaint}`}>Empty</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RevenueView() {
+  const t = useTheme();
+  const totalRev = REVENUE_TABLE.reduce((s, r) => s + r.revenue, 0);
+  const totalExp = REVENUE_TABLE.reduce((s, r) => s + r.expenses, 0);
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard label="Revenue (Jul)" value={money(totalRev)} icon={TrendingUp} />
+        <StatCard label="Expenses (Jul)" value={money(totalExp)} icon={Wallet} />
+        <StatCard label="Net Profit (Jul)" value={money(totalRev - totalExp)} icon={Target} />
+      </div>
+      <Card className="overflow-hidden">
+        <div className={`p-5 border-b ${t.borderLight}`}>
+          <SectionHeader title="Revenue by Page" subtitle="Current month" />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className={t.theadBg}>
+              <tr><Th>Facebook Page</Th><Th>Month</Th><Th>Revenue</Th><Th>Expenses</Th><Th>Net Profit</Th><Th>ROI</Th></tr>
+            </thead>
+            <tbody className={`divide-y ${t.borderLight}`}>
+              {REVENUE_TABLE.map((r) => {
+                const net = r.revenue - r.expenses;
+                const roi = r.expenses ? ((net / r.expenses) * 100).toFixed(0) : "-";
+                return (
+                  <tr key={r.page} className={`${t.hover} transition-colors`}>
+                    <Td className="font-medium">{r.page}</Td>
+                    <Td>{r.month}</Td>
+                    <Td>{money(r.revenue)}</Td>
+                    <Td>{money(r.expenses)}</Td>
+                    <Td className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{money(net)}</Td>
+                    <Td className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{roi}%</Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function TimelineView() {
+  const t = useTheme();
+  return (
+    <Card className="p-6">
+      <SectionHeader title="Project Timeline" subtitle="Key milestones for the Pages portfolio" />
+      <div className="relative pl-6">
+        <div className={`absolute left-[7px] top-1 bottom-1 w-px ${t.isDark ? "bg-slate-800" : "bg-slate-200"}`} />
+        <div className="space-y-6">
+          {TIMELINE.map((tl, i) => (
+            <div key={i} className="relative flex items-start gap-4">
+              <span className={`absolute -left-6 top-1 w-3.5 h-3.5 rounded-full border-2 ${t.isDark ? "border-slate-900" : "border-white"} ${
+                tl.status === "Done" ? "bg-emerald-500" : tl.status === "In Progress" ? t.accentSolid : "bg-slate-300"
+              }`} />
+              <div className="flex-1 flex items-center justify-between">
+                <div>
+                  <p className={`text-sm font-medium ${t.text}`}>{tl.milestone}</p>
+                  <p className={`text-xs ${t.textMuted} mt-0.5`}>Target: {tl.target}</p>
+                </div>
+                <StatusBadge status={tl.status} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Theme picker
+// ---------------------------------------------------------------------------
+
+function ThemePicker({ isDark, setIsDark, accentKey, setAccentKey }) {
+  const t = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`w-9 h-9 rounded-xl border ${t.border} flex items-center justify-center ${t.textMuted} ${t.hover} transition-colors`}
+        title="Theme"
+      >
+        <Palette className="w-4 h-4" />
+      </button>
+      {open && (
+        <div className={`absolute right-0 mt-2 w-56 ${t.cardBg} backdrop-blur-md border ${t.border} rounded-2xl shadow-lg p-4 z-20`}>
+          <div className="flex items-center justify-between mb-3">
+            <p className={`text-xs font-semibold ${t.textMuted} uppercase tracking-wide`}>Appearance</p>
+            <button
+              onClick={() => setIsDark((d) => !d)}
+              className={`w-7 h-7 rounded-lg flex items-center justify-center border ${t.border} ${t.hover}`}
+            >
+              {isDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+          <p className={`text-xs font-semibold ${t.textMuted} uppercase tracking-wide mb-2`}>Accent color</p>
+          <div className="grid grid-cols-4 gap-2">
+            {ACCENTS.map((ac) => (
+              <button
+                key={ac.key}
+                onClick={() => setAccentKey(ac.key)}
+                title={ac.label}
+                className="w-9 h-9 rounded-full flex items-center justify-center border-2 transition-transform hover:scale-110"
+                style={{ backgroundColor: ac.hex, borderColor: accentKey === ac.key ? (t.isDark ? "#f1f5f9" : "#0f172a") : "transparent" }}
+              >
+                {accentKey === ac.key && <Check className="w-4 h-4 text-white" strokeWidth={3} />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// App shell
+// ---------------------------------------------------------------------------
+
+function App() {
+  const [active, setActive] = useState("dashboard");
+  const [query, setQuery] = useState("");
+  const [isDark, setIsDark] = useState(false);
+  const [accentKey, setAccentKey] = useState("blue");
+
+  const t = useMemo(() => buildTokens(isDark, accentKey), [isDark, accentKey]);
+
+  const view = useMemo(() => {
+    switch (active) {
+      case "assets": return <AssetsView />;
+      case "pages": return <PagesView />;
+      case "content": return <ContentView />;
+      case "budget": return <BudgetView />;
+      case "revenue": return <RevenueView />;
+      case "timeline": return <TimelineView />;
+      default: return <DashboardView />;
+    }
+  }, [active, isDark, accentKey]);
+
+  const activeLabel = NAV.find((n) => n.id === active)?.label ?? "Dashboard";
+
+  return (
+    <ThemeContext.Provider value={t}>
+      <div className={`min-h-screen ${t.page} flex ${t.text}`} style={{ fontFamily: "Inter, ui-sans-serif, system-ui" }}>
+        {/* Sidebar */}
+        <aside className={`w-60 flex-shrink-0 ${t.sidebarBg} border-r ${t.border} flex flex-col sticky top-0 h-screen`}>
+          <div className={`h-16 flex items-center gap-2.5 px-5 border-b ${t.borderLight}`}>
+            <div className={`w-8 h-8 rounded-lg ${t.accentSolid} flex items-center justify-center`}>
+              <Flag className="w-4.5 h-4.5 text-white" />
+            </div>
+            <div>
+              <p className={`text-sm font-semibold ${t.text} leading-none`}>RunGate Cash</p>
+              <p className={`text-[11px] ${t.textFaint} leading-none mt-0.5`}>Portfolio Manager</p>
+            </div>
+          </div>
+          <nav className="flex-1 px-3 py-4 space-y-1">
+            {NAV.map((item) => {
+              const Icon = item.icon;
+              const isActive = active === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActive(item.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors duration-200 ${
+                    isActive ? `${t.accentLightBg} ${t.accentText}` : `${t.textMuted} ${t.hover}`
+                  }`}
+                >
+                  <Icon className="w-4 h-4" strokeWidth={2} />
+                  {item.label}
+                  {isActive && <ChevronRight className="w-3.5 h-3.5 ml-auto" />}
+                </button>
+              );
+            })}
+          </nav>
+          <div className={`p-4 border-t ${t.borderLight}`}>
+            <div className={`rounded-xl ${t.inputBg} p-3.5`}>
+              <p className={`text-xs font-medium ${t.text}`}>10 Pages live</p>
+              <p className={`text-[11px] ${t.textMuted} mt-0.5`}>Break-even estimated Sep 2026</p>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main */}
+        <div className="flex-1 min-w-0">
+          <header className={`h-16 ${t.headerBg} backdrop-blur-sm border-b ${t.border} flex items-center justify-between px-6 sticky top-0 z-10`}>
+            <div>
+              <p className={`text-xs ${t.textFaint}`}>Pages</p>
+              <h1 className={`text-base font-semibold ${t.text}`}>{activeLabel}</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="relative hidden sm:block">
+                <Search className={`w-4 h-4 ${t.textFaint} absolute left-3 top-1/2 -translate-y-1/2`} />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search..."
+                  className={`w-56 pl-9 pr-3 py-2 rounded-xl border ${t.border} text-sm ${t.inputBg} focus:outline-none focus:ring-2 ${t.accentRing} transition-all ${t.text}`}
+                />
+              </div>
+              <button className={`w-9 h-9 rounded-xl border ${t.border} flex items-center justify-center ${t.textMuted} ${t.hover} transition-colors`}>
+                <Users className="w-4 h-4" />
+              </button>
+              <ThemePicker isDark={isDark} setIsDark={setIsDark} accentKey={accentKey} setAccentKey={setAccentKey} />
+            </div>
+          </header>
+          <main className="p-6">{view}</main>
+        </div>
+      </div>
+    </ThemeContext.Provider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

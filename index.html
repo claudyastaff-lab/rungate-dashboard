@@ -46,7 +46,8 @@
 <body>
   <div id="root"></div>
 
-  <script type="text/babel" data-presets="react">
+  <!-- JSX source kept out of Babel's auto-runner; compiled explicitly below. -->
+  <script type="text/jsx-source" id="app-src">
 // Pull hooks/components off the UMD globals instead of ES imports.
 const { useState, useMemo, createContext, useContext } = React;
 const {
@@ -775,6 +776,20 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+
+  <!-- Compile the JSX with the CLASSIC runtime (uses the global React.createElement,
+       so no ES `import` is emitted) and run it. -->
+  <script>
+    (function () {
+      var src = document.getElementById("app-src").textContent;
+      var out = Babel.transform(src, {
+        presets: [["react", { runtime: "classic" }]]
+      }).code;
+      var s = document.createElement("script");
+      s.textContent = out;
+      document.body.appendChild(s);
+    })();
   </script>
 </body>
 </html>

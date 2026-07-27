@@ -51,11 +51,12 @@
   <!-- JSX source kept out of Babel's auto-runner; compiled explicitly below. -->
   <script type="text/jsx-source" id="app-src">
 // Pull hooks/components off the UMD globals instead of ES imports.
-const { useState, useMemo, createContext, useContext } = React;
+const { useState, useMemo, useEffect, useRef, createContext, useContext } = React;
 const {
   LayoutDashboard, Layers, Flag, Film, Wallet, TrendingUp, CalendarClock,
   Plus, Search, Moon, Sun, ChevronRight, CheckCircle2, Clock, AlertTriangle,
-  DollarSign, Users, Target, ArrowUpRight, ArrowDownRight, Palette, Check
+  DollarSign, Users, Target, ArrowUpRight, ArrowDownRight, Palette, Check,
+  Download, ChevronUp, ChevronDown, X
 } = LucideReact;
 const {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -79,6 +80,10 @@ const ACCENTS = [
 
 const ThemeContext = createContext(null);
 const useTheme = () => useContext(ThemeContext);
+
+// Shared filter/search query (drives the header search + smart table filtering).
+const QueryContext = createContext({ query: "", setQuery: () => {} });
+const useQuery = () => useContext(QueryContext);
 
 function buildTokens(isDark, accentKey) {
   const a = accentKey;
@@ -306,6 +311,270 @@ function Td({ children, className = "" }) {
 }
 
 // ---------------------------------------------------------------------------
+// Smart query engine  (the useful idea distilled from the GenPark skill,
+// implemented properly: field filters, numeric operators, and free-text search)
+// ---------------------------------------------------------------------------
+
+// "eligible revenue>100 category:home"  ->  list of typed tokens
+function parseQuery(q) {
+  if (!q || !q.trim()) return [];
+  const parts = q.match(/"[^"]+"|\S+/g) || [];
+  return parts.map((raw) => {
+    const p = raw.replace(/^"|"$/g, "");
+    const m = p.match(/^([\w .%-]+?)\s*(>=|<=|>|<|=|:)\s*(.+)$/);
+    if (m) return { field: m[1].trim().toLowerCase(), op: m[2], val: m[3].replace(/^"|"$/g, "").toLowerCase() };
+    return { field: null, op: "contains", val: p.toLowerCase() };
+  });
+}
+
+function cellValue(col, row) {
+  return col.value ? col.value(row) : row[col.key];
+}
+
+function findColumn(columns, field) {
+  return columns.find(
+    (c) =>
+      c.key.toLowerCase() === field ||
+      c.label.toLowerCase() === field ||
+      c.key.toLowerCase().startsWith(field) ||
+      c.label.toLowerCase().startsWith(field)
+  );
+}
+
+function matchRow(row, tokens, columns) {
+  if (!tokens.length) return true;
+  return tokens.every((tok) => {
+    if (!tok.field) {
+      return columns.some((c) => String(cellValue(c, row)).toLowerCase().includes(tok.val));
+    }
+    const col = findColumn(columns, tok.field);
+    if (!col) {
+      return columns.some((c) => String(cellValue(c, row)).toLowerCase().includes(tok.val));
+    }
+    const raw = cellValue(col, row);
+    if (tok.op === ":" || tok.op === "contains") {
+      return String(raw).toLowerCase().includes(tok.val);
+    }
+    const num = parseFloat(String(raw).replace(/[^0-9.-]/g, ""));
+    const target = parseFloat(tok.val);
+    if (isNaN(num) || isNaN(target)) {
+      return tok.op === "=" ? String(raw).toLowerCase() === tok.val : String(raw).toLowerCase().includes(tok.val);
+    }
+    switch (tok.op) {
+      case ">": return num > target;
+      case "<": return num < target;
+      case ">=": return num >= target;
+      case "<=": return num <= target;
+      case "=": return num === target;
+      default: return true;
+    }
+  });
+}
+
+function downloadCSV(title, columns, rows) {
+  const esc = (v) => {
+    v = String(v == null ? "" : v);
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  };
+  const lines = [columns.map((c) => esc(c.label)).join(",")];
+  rows.forEach((r) => {
+    lines.push(columns.map((c) => esc(c.csv ? c.csv(r) : cellValue(c, r))).join(","));
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = (title || "export").replace(/\s+/g, "_").toLowerCase() + ".csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Generic, sortable, filterable, exportable table with a totals footer.
+function DataTable({ title, subtitle, columns, rows, addLabel }) {
+  const t = useTheme();
+  const { query, setQuery } = useQuery();
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+
+  const tokens = useMemo(() => parseQuery(query), [query]);
+  const filtered = useMemo(() => rows.filter((r) => matchRow(r, tokens, columns)), [rows, tokens, columns]);
+
+  const sorted = useMemo(() => {
+    if (!sortKey) return filtered;
+    const col = columns.find((c) => c.key === sortKey);
+    if (!col) return filtered;
+    const arr = [...filtered].sort((a, b) => {
+      const av = cellValue(col, a), bv = cellValue(col, b);
+      return col.numeric ? Number(av) - Number(bv) : String(av).localeCompare(String(bv));
+    });
+    if (sortDir === "desc") arr.reverse();
+    return arr;
+  }, [filtered, sortKey, sortDir, columns]);
+
+  const totals = useMemo(() => {
+    const out = {};
+    columns.forEach((c) => {
+      if (c.total) out[c.key] = sorted.reduce((s, r) => s + (Number(cellValue(c, r)) || 0), 0);
+    });
+    return out;
+  }, [sorted, columns]);
+
+  const moneyCols = columns.filter((c) => c.total && c.money);
+
+  const toggleSort = (col) => {
+    if (col.sortable === false) return;
+    if (sortKey === col.key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(col.key); setSortDir("asc"); }
+  };
+
+  const hasTotals = Object.keys(totals).length > 0;
+
+  return (
+    <Card className="overflow-hidden">
+      <div className={`p-5 flex items-center justify-between border-b ${t.borderLight}`}>
+        <SectionHeader title={title} subtitle={subtitle} />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => downloadCSV(title, columns, sorted)}
+            className={`inline-flex items-center gap-1.5 border ${t.border} ${t.hover} ${t.textMuted} text-sm font-medium px-3 py-2 rounded-xl transition-colors`}
+            title="Export current view to CSV"
+          >
+            <Download className="w-4 h-4" /> CSV
+          </button>
+          {addLabel && <PrimaryButton>{addLabel}</PrimaryButton>}
+        </div>
+      </div>
+
+      <div className={`px-5 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs ${t.textMuted} ${t.theadBg} border-b ${t.borderLight}`}>
+        <span><b className={t.text}>{sorted.length}</b> of {rows.length} rows</span>
+        {moneyCols.map((c) => (
+          <span key={c.key}>{c.label}: <b className={t.text}>{money(totals[c.key] || 0)}</b></span>
+        ))}
+        {query && (
+          <button onClick={() => setQuery("")} className={`inline-flex items-center gap-1 ${t.accentTextSolid} font-medium`}>
+            <X className="w-3 h-3" /> clear filter
+          </button>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className={t.theadBg}>
+            <tr>
+              {columns.map((c) => (
+                <th
+                  key={c.key}
+                  onClick={() => toggleSort(c)}
+                  className={`text-left text-xs font-semibold ${t.textMuted} uppercase tracking-wide px-4 py-3 whitespace-nowrap ${c.sortable === false ? "" : "cursor-pointer select-none " + t.hover}`}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {c.label}
+                    {sortKey === c.key
+                      ? (sortDir === "asc" ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />)
+                      : null}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className={`divide-y ${t.borderLight}`}>
+            {sorted.map((r, i) => (
+              <tr key={i} className={`${t.hover} transition-colors`}>
+                {columns.map((c) => (
+                  <td key={c.key} className={`px-4 py-3 text-sm ${t.text} whitespace-nowrap ${c.className || ""}`}>
+                    {c.render ? c.render(r) : cellValue(c, r)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={columns.length} className={`px-4 py-10 text-center text-sm ${t.textFaint}`}>
+                  No rows match “{query}”
+                </td>
+              </tr>
+            )}
+          </tbody>
+          {hasTotals && sorted.length > 0 && (
+            <tfoot>
+              <tr className={`${t.theadBg} border-t ${t.border}`}>
+                {columns.map((c, idx) => (
+                  <td key={c.key} className={`px-4 py-3 text-sm font-semibold ${t.text} whitespace-nowrap`}>
+                    {idx === 0 ? "Total" : c.total ? (c.money ? money(totals[c.key]) : totals[c.key].toLocaleString()) : ""}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+// Column definitions for each table view.
+const ASSET_COLUMNS = [
+  { key: "name", label: "Asset Name", className: "font-medium" },
+  { key: "managedBy", label: "Managed By" },
+  { key: "page", label: "Facebook Page" },
+  { key: "portfolio", label: "Business Portfolio" },
+  { key: "setup", label: "Setup Date" },
+  { key: "cost", label: "Cost", numeric: true, total: true, money: true, render: (r) => money(r.cost) },
+  { key: "onboarding", label: "Onboarding", render: (r) => <StatusBadge status={r.onboarding} /> },
+  { key: "account", label: "Account Status", render: (r) => <StatusBadge status={r.account} /> },
+];
+
+const PAGE_COLUMNS = [
+  { key: "name", label: "Page Name", className: "font-medium" },
+  { key: "category", label: "Category" },
+  { key: "niche", label: "Niche", className: "text-slate-500" },
+  { key: "followers", label: "Followers", numeric: true, total: true, render: (r) => r.followers.toLocaleString() },
+  { key: "created", label: "Created" },
+  { key: "rec", label: "Recommendation", render: (r) => <StatusBadge status={r.rec} /> },
+  { key: "monetization", label: "Monetization", render: (r) => <StatusBadge status={r.monetization} /> },
+  { key: "revenue", label: "Revenue", numeric: true, total: true, money: true, className: "font-medium", render: (r) => money(r.revenue) },
+];
+
+const BUDGET_COLUMNS = [
+  { key: "item", label: "Item", className: "font-medium" },
+  { key: "qty", label: "Qty", numeric: true, total: true },
+  { key: "unit", label: "Unit Cost", numeric: true, money: true, render: (r) => money(r.unit) },
+  { key: "lineTotal", label: "Total Cost", numeric: true, total: true, money: true, className: "font-medium", value: (r) => r.qty * r.unit, render: (r) => money(r.qty * r.unit), csv: (r) => r.qty * r.unit },
+  { key: "category", label: "Category" },
+  { key: "paid", label: "Paid", render: (r) => <StatusBadge status={r.paid === "Yes" ? "Active" : "In Review"} />, value: (r) => r.paid },
+  { key: "supplier", label: "Supplier", className: "text-slate-500" },
+  { key: "notes", label: "Notes", className: "text-slate-500" },
+];
+
+const REVENUE_COLUMNS = [
+  { key: "page", label: "Facebook Page", className: "font-medium" },
+  { key: "month", label: "Month" },
+  { key: "revenue", label: "Revenue", numeric: true, total: true, money: true, render: (r) => money(r.revenue) },
+  { key: "expenses", label: "Expenses", numeric: true, total: true, money: true, render: (r) => money(r.expenses) },
+  {
+    key: "net", label: "Net Profit", numeric: true, total: true, money: true,
+    value: (r) => r.revenue - r.expenses,
+    csv: (r) => r.revenue - r.expenses,
+    render: (r) => {
+      const net = r.revenue - r.expenses;
+      return <span className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{money(net)}</span>;
+    },
+  },
+  {
+    key: "roi", label: "ROI", numeric: true,
+    value: (r) => (r.expenses ? ((r.revenue - r.expenses) / r.expenses) * 100 : 0),
+    csv: (r) => (r.expenses ? Math.round(((r.revenue - r.expenses) / r.expenses) * 100) : 0),
+    render: (r) => {
+      const net = r.revenue - r.expenses;
+      const roi = r.expenses ? ((net / r.expenses) * 100).toFixed(0) : "-";
+      return <span className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{roi}%</span>;
+    },
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
 
@@ -417,112 +686,16 @@ function DashboardView() {
 }
 
 function AssetsView() {
-  const t = useTheme();
-  return (
-    <Card className="overflow-hidden">
-      <div className={`p-5 flex items-center justify-between border-b ${t.borderLight}`}>
-        <SectionHeader title="Assets" subtitle={`${ASSETS.length} Page assets across the portfolio`} />
-        <PrimaryButton>Add Asset</PrimaryButton>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className={t.theadBg}>
-            <tr>
-              <Th>Asset Name</Th><Th>Managed By</Th><Th>Facebook Page</Th><Th>Business Portfolio</Th>
-              <Th>Setup Date</Th><Th>Cost</Th><Th>Onboarding</Th><Th>Account Status</Th>
-            </tr>
-          </thead>
-          <tbody className={`divide-y ${t.borderLight}`}>
-            {ASSETS.map((a) => (
-              <tr key={a.name} className={`${t.hover} transition-colors`}>
-                <Td className="font-medium">{a.name}</Td>
-                <Td>{a.managedBy}</Td>
-                <Td>{a.page}</Td>
-                <Td>{a.portfolio}</Td>
-                <Td>{a.setup}</Td>
-                <Td>{money(a.cost)}</Td>
-                <Td><StatusBadge status={a.onboarding} /></Td>
-                <Td><StatusBadge status={a.account} /></Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
+  return <DataTable title="Assets" subtitle={`${ASSETS.length} Page assets across the portfolio`} columns={ASSET_COLUMNS} rows={ASSETS} addLabel="Add Asset" />;
 }
 
 function PagesView() {
-  const t = useTheme();
-  return (
-    <Card className="overflow-hidden">
-      <div className={`p-5 flex items-center justify-between border-b ${t.borderLight}`}>
-        <SectionHeader title="Facebook Pages" subtitle={`${PAGES.length} live Pages`} />
-        <PrimaryButton>Add Page</PrimaryButton>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className={t.theadBg}>
-            <tr>
-              <Th>Page Name</Th><Th>Category</Th><Th>Niche</Th><Th>Followers</Th>
-              <Th>Created</Th><Th>Recommendation</Th><Th>Monetization</Th><Th>Revenue</Th>
-            </tr>
-          </thead>
-          <tbody className={`divide-y ${t.borderLight}`}>
-            {PAGES.map((p) => (
-              <tr key={p.name} className={`${t.hover} transition-colors`}>
-                <Td className="font-medium">{p.name}</Td>
-                <Td>{p.category}</Td>
-                <Td className={t.textMuted}>{p.niche}</Td>
-                <Td>{p.followers.toLocaleString()}</Td>
-                <Td>{p.created}</Td>
-                <Td><StatusBadge status={p.rec} /></Td>
-                <Td><StatusBadge status={p.monetization} /></Td>
-                <Td className="font-medium">{money(p.revenue)}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
+  return <DataTable title="Facebook Pages" subtitle={`${PAGES.length} live Pages`} columns={PAGE_COLUMNS} rows={PAGES} addLabel="Add Page" />;
 }
 
 function BudgetView() {
-  const t = useTheme();
   const total = BUDGET.reduce((s, b) => s + b.qty * b.unit, 0);
-  return (
-    <Card className="overflow-hidden">
-      <div className={`p-5 flex items-center justify-between border-b ${t.borderLight}`}>
-        <SectionHeader title="Budget Tracker" subtitle={`Total spend: ${money(total)}`} />
-        <PrimaryButton>Add Item</PrimaryButton>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className={t.theadBg}>
-            <tr>
-              <Th>Item</Th><Th>Qty</Th><Th>Unit Cost</Th><Th>Total Cost</Th>
-              <Th>Category</Th><Th>Paid</Th><Th>Supplier</Th><Th>Notes</Th>
-            </tr>
-          </thead>
-          <tbody className={`divide-y ${t.borderLight}`}>
-            {BUDGET.map((b) => (
-              <tr key={b.item} className={`${t.hover} transition-colors`}>
-                <Td className="font-medium">{b.item}</Td>
-                <Td>{b.qty}</Td>
-                <Td>{money(b.unit)}</Td>
-                <Td className="font-medium">{money(b.qty * b.unit)}</Td>
-                <Td>{b.category}</Td>
-                <Td><StatusBadge status={b.paid === "Yes" ? "Active" : "In Review"} /></Td>
-                <Td className={t.textMuted}>{b.supplier}</Td>
-                <Td className={t.textMuted}>{b.notes}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
+  return <DataTable title="Budget Tracker" subtitle={`Total spend: ${money(total)}`} columns={BUDGET_COLUMNS} rows={BUDGET} addLabel="Add Item" />;
 }
 
 function ContentView() {
@@ -573,34 +746,7 @@ function RevenueView() {
         <StatCard label="Expenses (Jul)" value={money(totalExp)} icon={Wallet} />
         <StatCard label="Net Profit (Jul)" value={money(totalRev - totalExp)} icon={Target} />
       </div>
-      <Card className="overflow-hidden">
-        <div className={`p-5 border-b ${t.borderLight}`}>
-          <SectionHeader title="Revenue by Page" subtitle="Current month" />
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className={t.theadBg}>
-              <tr><Th>Facebook Page</Th><Th>Month</Th><Th>Revenue</Th><Th>Expenses</Th><Th>Net Profit</Th><Th>ROI</Th></tr>
-            </thead>
-            <tbody className={`divide-y ${t.borderLight}`}>
-              {REVENUE_TABLE.map((r) => {
-                const net = r.revenue - r.expenses;
-                const roi = r.expenses ? ((net / r.expenses) * 100).toFixed(0) : "-";
-                return (
-                  <tr key={r.page} className={`${t.hover} transition-colors`}>
-                    <Td className="font-medium">{r.page}</Td>
-                    <Td>{r.month}</Td>
-                    <Td>{money(r.revenue)}</Td>
-                    <Td>{money(r.expenses)}</Td>
-                    <Td className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{money(net)}</Td>
-                    <Td className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{roi}%</Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      <DataTable title="Revenue by Page" subtitle="Current month" columns={REVENUE_COLUMNS} rows={REVENUE_TABLE} />
     </div>
   );
 }
@@ -681,14 +827,87 @@ function ThemePicker({ isDark, setIsDark, accentKey, setAccentKey }) {
 }
 
 // ---------------------------------------------------------------------------
+// Command palette  (⌘K / Ctrl-K)
+// ---------------------------------------------------------------------------
+
+function CommandPalette({ open, setOpen, active, setActive, isDark, setIsDark, accentKey, setAccentKey }) {
+  const t = useTheme();
+  const [q, setQ] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (open) {
+      setQ("");
+      const id = setTimeout(() => inputRef.current && inputRef.current.focus(), 0);
+      return () => clearTimeout(id);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const items = [];
+  NAV.forEach((n) => items.push({ id: "nav:" + n.id, label: "Go to " + n.label, icon: n.icon, run: () => { setActive(n.id); setOpen(false); } }));
+  items.push({ id: "theme", label: isDark ? "Switch to light mode" : "Switch to dark mode", icon: isDark ? Sun : Moon, run: () => { setIsDark((d) => !d); setOpen(false); } });
+  ACCENTS.forEach((a) => items.push({ id: "accent:" + a.key, label: "Accent color: " + a.label, dot: a.hex, run: () => { setAccentKey(a.key); setOpen(false); } }));
+
+  const filtered = items.filter((it) => it.label.toLowerCase().includes(q.toLowerCase()));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 px-4 bg-black/40 backdrop-blur-sm" onClick={() => setOpen(false)}>
+      <div onClick={(e) => e.stopPropagation()} className={`w-full max-w-lg ${t.cardBg} backdrop-blur-md border ${t.border} rounded-2xl shadow-2xl overflow-hidden`}>
+        <div className={`flex items-center gap-2 px-4 py-3 border-b ${t.borderLight}`}>
+          <Search className={`w-4 h-4 ${t.textFaint}`} />
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && filtered[0]) filtered[0].run(); if (e.key === "Escape") setOpen(false); }}
+            placeholder="Jump to a view or change the theme…"
+            className={`flex-1 bg-transparent outline-none text-sm ${t.text}`}
+          />
+          <span className={`text-[10px] ${t.textFaint} border ${t.border} rounded px-1.5 py-0.5`}>ESC</span>
+        </div>
+        <div className="max-h-80 overflow-y-auto py-2">
+          {filtered.map((it) => (
+            <button key={it.id} onClick={it.run} className={`w-full flex items-center gap-3 px-4 py-2 text-sm ${t.text} ${t.hover} text-left transition-colors`}>
+              {it.icon ? <it.icon className={`w-4 h-4 ${t.textMuted}`} /> : <span className="w-3.5 h-3.5 rounded-full flex-shrink-0" style={{ backgroundColor: it.dot }} />}
+              {it.label}
+            </button>
+          ))}
+          {filtered.length === 0 && <p className={`px-4 py-6 text-center text-sm ${t.textFaint}`}>No matches</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // App shell
 // ---------------------------------------------------------------------------
+
+function readStored(key, fallback) {
+  try { const v = localStorage.getItem(key); return v == null ? fallback : v; } catch (e) { return fallback; }
+}
 
 function App() {
   const [active, setActive] = useState("dashboard");
   const [query, setQuery] = useState("");
-  const [isDark, setIsDark] = useState(false);
-  const [accentKey, setAccentKey] = useState("blue");
+  const [isDark, setIsDark] = useState(() => readStored("rg-dark", "0") === "1");
+  const [accentKey, setAccentKey] = useState(() => readStored("rg-accent", "blue"));
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Persist appearance choices between visits.
+  useEffect(() => { try { localStorage.setItem("rg-dark", isDark ? "1" : "0"); } catch (e) {} }, [isDark]);
+  useEffect(() => { try { localStorage.setItem("rg-accent", accentKey); } catch (e) {} }, [accentKey]);
+
+  // ⌘K / Ctrl-K opens the command palette.
+  useEffect(() => {
+    const h = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((o) => !o); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
 
   const t = useMemo(() => buildTokens(isDark, accentKey), [isDark, accentKey]);
 
@@ -708,6 +927,7 @@ function App() {
 
   return (
     <ThemeContext.Provider value={t}>
+     <QueryContext.Provider value={{ query, setQuery }}>
       <div className={`min-h-screen ${t.page} flex ${t.text}`} style={{ fontFamily: "Inter, ui-sans-serif, system-ui" }}>
         {/* Sidebar */}
         <aside className={`w-60 flex-shrink-0 ${t.sidebarBg} border-r ${t.border} flex flex-col sticky top-0 h-screen`}>
@@ -760,10 +980,23 @@ function App() {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search..."
-                  className={`w-56 pl-9 pr-3 py-2 rounded-xl border ${t.border} text-sm ${t.inputBg} focus:outline-none focus:ring-2 ${t.accentRing} transition-all ${t.text}`}
+                  placeholder="Search or filter, e.g. revenue > 100"
+                  title="Type to filter the current table. Supports field:value and >, <, >=, <= (e.g. status:Active, followers>3000)."
+                  className={`w-72 pl-9 pr-8 py-2 rounded-xl border ${t.border} text-sm ${t.inputBg} focus:outline-none focus:ring-2 ${t.accentRing} transition-all ${t.text}`}
                 />
+                {query && (
+                  <button onClick={() => setQuery("")} title="Clear" className={`absolute right-2.5 top-1/2 -translate-y-1/2 ${t.textFaint} hover:${t.textMuted}`}>
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
+              <button
+                onClick={() => setPaletteOpen(true)}
+                title="Command palette (⌘K)"
+                className={`hidden sm:flex items-center gap-1.5 h-9 px-3 rounded-xl border ${t.border} ${t.textMuted} ${t.hover} transition-colors text-xs font-medium`}
+              >
+                <span className="text-sm leading-none">⌘</span>K
+              </button>
               <button className={`w-9 h-9 rounded-xl border ${t.border} flex items-center justify-center ${t.textMuted} ${t.hover} transition-colors`}>
                 <Users className="w-4 h-4" />
               </button>
@@ -773,6 +1006,17 @@ function App() {
           <main className="p-6">{view}</main>
         </div>
       </div>
+      <CommandPalette
+        open={paletteOpen}
+        setOpen={setPaletteOpen}
+        active={active}
+        setActive={setActive}
+        isDark={isDark}
+        setIsDark={setIsDark}
+        accentKey={accentKey}
+        setAccentKey={setAccentKey}
+      />
+     </QueryContext.Provider>
     </ThemeContext.Provider>
   );
 }

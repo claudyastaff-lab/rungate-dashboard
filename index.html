@@ -232,7 +232,7 @@ const STATUS_COLORS = { Active: "#22c55e", "Warming Up": "#facc15", "In Review":
 // Helpers / shared components
 // ---------------------------------------------------------------------------
 
-const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function StatusBadge({ status }) {
   const map = {

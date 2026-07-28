@@ -11,8 +11,7 @@
   <!-- Tailwind (Play CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    // Safelist the dynamically-built accent color classes so they survive
-    // runtime theme switches (Tailwind JIT can't see string-interpolated classes).
+    // Safelist the dynamically-built accent color classes so they survive runtime theme switches.
     (function () {
       const accents = ["blue", "violet", "emerald", "rose", "amber", "teal", "indigo", "orange"];
       const safelist = [];
@@ -43,6 +42,15 @@
   <style>
     html, body, #root { height: 100%; }
     body { margin: 0; }
+    @keyframes rgFade { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes rgPop { from { opacity: 0; transform: translateY(8px) scale(.98) } to { opacity: 1; transform: none } }
+    @keyframes rgSlide { from { transform: translateX(-100%) } to { transform: none } }
+    .rg-fade { animation: rgFade .15s ease-out }
+    .rg-pop { animation: rgPop .18s cubic-bezier(.2,.8,.2,1) }
+    .rg-slide { animation: rgSlide .2s cubic-bezier(.2,.8,.2,1) }
+    /* thin scrollbars */
+    ::-webkit-scrollbar { height: 8px; width: 8px }
+    ::-webkit-scrollbar-thumb { background: rgba(148,163,184,.4); border-radius: 8px }
   </style>
 </head>
 <body>
@@ -56,7 +64,7 @@ const {
   LayoutDashboard, Layers, Flag, Film, Wallet, TrendingUp, CalendarClock,
   Plus, Search, Moon, Sun, ChevronRight, CheckCircle2, Clock, AlertTriangle,
   DollarSign, Users, Target, ArrowUpRight, ArrowDownRight, Palette, Check,
-  Download, ChevronUp, ChevronDown, X
+  Download, ChevronUp, ChevronDown, X, Pencil, Trash2, Menu, RotateCcw
 } = LucideReact;
 const {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -81,9 +89,14 @@ const ACCENTS = [
 const ThemeContext = createContext(null);
 const useTheme = () => useContext(ThemeContext);
 
-// Shared filter/search query (drives the header search + smart table filtering).
 const QueryContext = createContext({ query: "", setQuery: () => {} });
 const useQuery = () => useContext(QueryContext);
+
+const DataContext = createContext(null);
+const useData = () => useContext(DataContext);
+
+const NavContext = createContext({ go: () => {} });
+const useNav = () => useContext(NavContext);
 
 function buildTokens(isDark, accentKey) {
   const a = accentKey;
@@ -100,11 +113,11 @@ function buildTokens(isDark, accentKey) {
     borderLight: isDark ? "border-slate-800" : "border-slate-100",
     hover: isDark ? "hover:bg-slate-800/60" : "hover:bg-slate-50/60",
     inputBg: isDark ? "bg-slate-800" : "bg-slate-50",
+    inputBorder: isDark ? "border-slate-700" : "border-slate-200",
     sidebarBg: isDark ? "bg-slate-900" : "bg-white",
     headerBg: isDark ? "bg-slate-900/80" : "bg-white/80",
     theadBg: isDark ? "bg-slate-800/50" : "bg-slate-50/80",
     chipBg: isDark ? "bg-slate-800" : "bg-slate-100",
-    // accent-derived (built from literal shade classes so they stay core utilities)
     accentSolid: `bg-${a}-600`,
     accentSolidHover: `hover:bg-${a}-700`,
     accentText: isDark ? `text-${a}-300` : `text-${a}-700`,
@@ -117,10 +130,10 @@ function buildTokens(isDark, accentKey) {
 }
 
 // ---------------------------------------------------------------------------
-// Sample data
+// Seed data  (used until the user edits — their edits are saved to this browser)
 // ---------------------------------------------------------------------------
 
-const ASSETS = [
+const SEED_ASSETS = [
   { name: "Asset 01", managedBy: "Maria", page: "Northside Home Tips", portfolio: "Main BM", setup: "2026-05-02", cost: 45, onboarding: "Complete", account: "Active" },
   { name: "Asset 02", managedBy: "Maria", page: "Coastal Kitchen Co.", portfolio: "Main BM", setup: "2026-05-02", cost: 45, onboarding: "Complete", account: "Active" },
   { name: "Asset 03", managedBy: "Diego", page: "Urban Plant Corner", portfolio: "Main BM", setup: "2026-05-04", cost: 40, onboarding: "Complete", account: "Active" },
@@ -133,7 +146,7 @@ const ASSETS = [
   { name: "Asset 10", managedBy: "Priya", page: "Small Space Style", portfolio: "Main BM", setup: "2026-05-15", cost: 48, onboarding: "Complete", account: "Active" },
 ];
 
-const PAGES = [
+const SEED_PAGES = [
   { name: "Northside Home Tips", category: "Home & Garden", niche: "Home organization", followers: 4200, created: "2026-05-03", rec: "Recommended", monetization: "Eligible", revenue: 310, status: "Active" },
   { name: "Coastal Kitchen Co.", category: "Food", niche: "Coastal recipes", followers: 3800, created: "2026-05-03", rec: "Recommended", monetization: "Eligible", revenue: 275, status: "Active" },
   { name: "Urban Plant Corner", category: "Home & Garden", niche: "Houseplants", followers: 2950, created: "2026-05-05", rec: "Standard", monetization: "In Review", revenue: 90, status: "Active" },
@@ -146,7 +159,7 @@ const PAGES = [
   { name: "Small Space Style", category: "Home & Garden", niche: "Apartment decor", followers: 2900, created: "2026-05-16", rec: "Standard", monetization: "Eligible", revenue: 130, status: "Active" },
 ];
 
-const BUDGET = [
+const SEED_BUDGET = [
   { item: "Business Manager verification", qty: 2, unit: 0, category: "Setup", paid: "Yes", supplier: "Meta", notes: "One-time" },
   { item: "Ad creative template pack", qty: 1, unit: 180, category: "Content", paid: "Yes", supplier: "Freelancer", notes: "Reusable across pages" },
   { item: "Stock footage subscription", qty: 1, unit: 39, category: "Content", paid: "Yes", supplier: "Storyblocks", notes: "Monthly" },
@@ -156,6 +169,17 @@ const BUDGET = [
   { item: "Freelance copywriter", qty: 10, unit: 15, category: "Labor", paid: "Yes", supplier: "Upwork", notes: "Per caption set" },
   { item: "Ad spend — trial campaigns", qty: 1, unit: 400, category: "Ads", paid: "Yes", supplier: "Meta Ads", notes: "Across 4 pages" },
 ];
+
+const SEED_REVENUE = [
+  { page: "Northside Home Tips", month: "Jul 2026", revenue: 310, expenses: 60 },
+  { page: "Coastal Kitchen Co.", month: "Jul 2026", revenue: 275, expenses: 55 },
+  { page: "Urban Plant Corner", month: "Jul 2026", revenue: 90, expenses: 48 },
+  { page: "Fit & Fresh Meals", month: "Jul 2026", revenue: 60, expenses: 48 },
+  { page: "Family Finance 101", month: "Jul 2026", revenue: 240, expenses: 58 },
+  { page: "Small Space Style", month: "Jul 2026", revenue: 130, expenses: 52 },
+];
+
+const SEED = { assets: SEED_ASSETS, pages: SEED_PAGES, budget: SEED_BUDGET, revenue: SEED_REVENUE };
 
 const CONTENT_COLUMNS = ["Idea", "Script", "Production", "Editing", "Ready", "Scheduled", "Published"];
 const CONTENT_CARDS = [
@@ -182,21 +206,6 @@ const REVENUE_TREND = [
   { month: "Jul", investment: 1950, revenue: 1105, roi: -43 },
 ];
 
-const REVENUE_TABLE = [
-  { page: "Northside Home Tips", month: "Jul 2026", revenue: 310, expenses: 60 },
-  { page: "Coastal Kitchen Co.", month: "Jul 2026", revenue: 275, expenses: 55 },
-  { page: "Urban Plant Corner", month: "Jul 2026", revenue: 90, expenses: 48 },
-  { page: "Fit & Fresh Meals", month: "Jul 2026", revenue: 60, expenses: 48 },
-  { page: "Family Finance 101", month: "Jul 2026", revenue: 240, expenses: 58 },
-  { page: "Small Space Style", month: "Jul 2026", revenue: 130, expenses: 52 },
-];
-
-const STATUS_OVERVIEW = [
-  { name: "Active", value: 8, color: "#22c55e" },
-  { name: "Warming Up", value: 1, color: "#facc15" },
-  { name: "In Review", value: 1, color: "#ef4444" },
-];
-
 const TIMELINE = [
   { milestone: "Purchase Assets", target: "May 2, 2026", status: "Done" },
   { milestone: "Warm-up / Growth Phase", target: "May 16, 2026", status: "Done" },
@@ -217,11 +226,13 @@ const NAV = [
   { id: "timeline", label: "Timeline", icon: CalendarClock },
 ];
 
+const STATUS_COLORS = { Active: "#22c55e", "Warming Up": "#facc15", "In Review": "#ef4444", Eligible: "#22c55e", "Not Eligible": "#94a3b8" };
+
 // ---------------------------------------------------------------------------
 // Helpers / shared components
 // ---------------------------------------------------------------------------
 
-const money = (n) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 function StatusBadge({ status }) {
   const map = {
@@ -237,6 +248,8 @@ function StatusBadge({ status }) {
     Done: "bg-emerald-50 text-emerald-700 border-emerald-200",
     "In Progress": "bg-sky-50 text-sky-700 border-sky-200",
     "Not Started": "bg-slate-100 text-slate-500 border-slate-200",
+    Yes: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    No: "bg-amber-50 text-amber-700 border-amber-200",
   };
   return (
     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${map[status] || "bg-slate-100 text-slate-600 border-slate-200"}`}>
@@ -281,9 +294,9 @@ function StatCard({ label, value, delta, deltaDir, icon: Icon }) {
 function SectionHeader({ title, subtitle, action }) {
   const t = useTheme();
   return (
-    <div className="flex items-center justify-between mb-5">
-      <div>
-        <h2 className={`text-lg font-semibold ${t.text}`}>{title}</h2>
+    <div className="flex items-center justify-between mb-5 gap-3">
+      <div className="min-w-0">
+        <h2 className={`text-lg font-semibold ${t.text} truncate`}>{title}</h2>
         {subtitle && <p className={`text-sm ${t.textMuted} mt-0.5`}>{subtitle}</p>}
       </div>
       {action}
@@ -291,31 +304,10 @@ function SectionHeader({ title, subtitle, action }) {
   );
 }
 
-function PrimaryButton({ children, icon: Icon = Plus }) {
-  const t = useTheme();
-  return (
-    <button className={`inline-flex items-center gap-1.5 ${t.accentSolid} ${t.accentSolidHover} text-white text-sm font-medium px-4 py-2 rounded-xl shadow-sm transition-colors duration-200`}>
-      <Icon className="w-4 h-4" />
-      {children}
-    </button>
-  );
-}
-
-function Th({ children }) {
-  const t = useTheme();
-  return <th className={`text-left text-xs font-semibold ${t.textMuted} uppercase tracking-wide px-4 py-3 whitespace-nowrap`}>{children}</th>;
-}
-function Td({ children, className = "" }) {
-  const t = useTheme();
-  return <td className={`px-4 py-3 text-sm ${t.text} whitespace-nowrap ${className}`}>{children}</td>;
-}
-
 // ---------------------------------------------------------------------------
-// Smart query engine  (the useful idea distilled from the GenPark skill,
-// implemented properly: field filters, numeric operators, and free-text search)
+// Smart query engine
 // ---------------------------------------------------------------------------
 
-// "eligible revenue>100 category:home"  ->  list of typed tokens
 function parseQuery(q) {
   if (!q || !q.trim()) return [];
   const parts = q.match(/"[^"]+"|\S+/g) || [];
@@ -333,33 +325,22 @@ function cellValue(col, row) {
 
 function findColumn(columns, field) {
   return columns.find(
-    (c) =>
-      c.key.toLowerCase() === field ||
-      c.label.toLowerCase() === field ||
-      c.key.toLowerCase().startsWith(field) ||
-      c.label.toLowerCase().startsWith(field)
+    (c) => c.key.toLowerCase() === field || c.label.toLowerCase() === field ||
+      c.key.toLowerCase().startsWith(field) || c.label.toLowerCase().startsWith(field)
   );
 }
 
 function matchRow(row, tokens, columns) {
   if (!tokens.length) return true;
   return tokens.every((tok) => {
-    if (!tok.field) {
-      return columns.some((c) => String(cellValue(c, row)).toLowerCase().includes(tok.val));
-    }
+    if (!tok.field) return columns.some((c) => String(cellValue(c, row)).toLowerCase().includes(tok.val));
     const col = findColumn(columns, tok.field);
-    if (!col) {
-      return columns.some((c) => String(cellValue(c, row)).toLowerCase().includes(tok.val));
-    }
+    if (!col) return columns.some((c) => String(cellValue(c, row)).toLowerCase().includes(tok.val));
     const raw = cellValue(col, row);
-    if (tok.op === ":" || tok.op === "contains") {
-      return String(raw).toLowerCase().includes(tok.val);
-    }
+    if (tok.op === ":" || tok.op === "contains") return String(raw).toLowerCase().includes(tok.val);
     const num = parseFloat(String(raw).replace(/[^0-9.-]/g, ""));
     const target = parseFloat(tok.val);
-    if (isNaN(num) || isNaN(target)) {
-      return tok.op === "=" ? String(raw).toLowerCase() === tok.val : String(raw).toLowerCase().includes(tok.val);
-    }
+    if (isNaN(num) || isNaN(target)) return tok.op === "=" ? String(raw).toLowerCase() === tok.val : String(raw).toLowerCase().includes(tok.val);
     switch (tok.op) {
       case ">": return num > target;
       case "<": return num < target;
@@ -372,149 +353,20 @@ function matchRow(row, tokens, columns) {
 }
 
 function downloadCSV(title, columns, rows) {
-  const esc = (v) => {
-    v = String(v == null ? "" : v);
-    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-  };
+  const esc = (v) => { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   const lines = [columns.map((c) => esc(c.label)).join(",")];
-  rows.forEach((r) => {
-    lines.push(columns.map((c) => esc(c.csv ? c.csv(r) : cellValue(c, r))).join(","));
-  });
+  rows.forEach((r) => lines.push(columns.map((c) => esc(c.csv ? c.csv(r) : cellValue(c, r))).join(",")));
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
-  a.download = (title || "export").replace(/\s+/g, "_").toLowerCase() + ".csv";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = (title || "export").replace(/\s+/g, "_").toLowerCase() + ".csv";
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
-// Generic, sortable, filterable, exportable table with a totals footer.
-function DataTable({ title, subtitle, columns, rows, addLabel }) {
-  const t = useTheme();
-  const { query, setQuery } = useQuery();
-  const [sortKey, setSortKey] = useState(null);
-  const [sortDir, setSortDir] = useState("asc");
+// ---------------------------------------------------------------------------
+// Column display + form-field schemas
+// ---------------------------------------------------------------------------
 
-  const tokens = useMemo(() => parseQuery(query), [query]);
-  const filtered = useMemo(() => rows.filter((r) => matchRow(r, tokens, columns)), [rows, tokens, columns]);
-
-  const sorted = useMemo(() => {
-    if (!sortKey) return filtered;
-    const col = columns.find((c) => c.key === sortKey);
-    if (!col) return filtered;
-    const arr = [...filtered].sort((a, b) => {
-      const av = cellValue(col, a), bv = cellValue(col, b);
-      return col.numeric ? Number(av) - Number(bv) : String(av).localeCompare(String(bv));
-    });
-    if (sortDir === "desc") arr.reverse();
-    return arr;
-  }, [filtered, sortKey, sortDir, columns]);
-
-  const totals = useMemo(() => {
-    const out = {};
-    columns.forEach((c) => {
-      if (c.total) out[c.key] = sorted.reduce((s, r) => s + (Number(cellValue(c, r)) || 0), 0);
-    });
-    return out;
-  }, [sorted, columns]);
-
-  const moneyCols = columns.filter((c) => c.total && c.money);
-
-  const toggleSort = (col) => {
-    if (col.sortable === false) return;
-    if (sortKey === col.key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(col.key); setSortDir("asc"); }
-  };
-
-  const hasTotals = Object.keys(totals).length > 0;
-
-  return (
-    <Card className="overflow-hidden">
-      <div className={`p-5 flex items-center justify-between border-b ${t.borderLight}`}>
-        <SectionHeader title={title} subtitle={subtitle} />
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => downloadCSV(title, columns, sorted)}
-            className={`inline-flex items-center gap-1.5 border ${t.border} ${t.hover} ${t.textMuted} text-sm font-medium px-3 py-2 rounded-xl transition-colors`}
-            title="Export current view to CSV"
-          >
-            <Download className="w-4 h-4" /> CSV
-          </button>
-          {addLabel && <PrimaryButton>{addLabel}</PrimaryButton>}
-        </div>
-      </div>
-
-      <div className={`px-5 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs ${t.textMuted} ${t.theadBg} border-b ${t.borderLight}`}>
-        <span><b className={t.text}>{sorted.length}</b> of {rows.length} rows</span>
-        {moneyCols.map((c) => (
-          <span key={c.key}>{c.label}: <b className={t.text}>{money(totals[c.key] || 0)}</b></span>
-        ))}
-        {query && (
-          <button onClick={() => setQuery("")} className={`inline-flex items-center gap-1 ${t.accentTextSolid} font-medium`}>
-            <X className="w-3 h-3" /> clear filter
-          </button>
-        )}
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className={t.theadBg}>
-            <tr>
-              {columns.map((c) => (
-                <th
-                  key={c.key}
-                  onClick={() => toggleSort(c)}
-                  className={`text-left text-xs font-semibold ${t.textMuted} uppercase tracking-wide px-4 py-3 whitespace-nowrap ${c.sortable === false ? "" : "cursor-pointer select-none " + t.hover}`}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {c.label}
-                    {sortKey === c.key
-                      ? (sortDir === "asc" ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />)
-                      : null}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className={`divide-y ${t.borderLight}`}>
-            {sorted.map((r, i) => (
-              <tr key={i} className={`${t.hover} transition-colors`}>
-                {columns.map((c) => (
-                  <td key={c.key} className={`px-4 py-3 text-sm ${t.text} whitespace-nowrap ${c.className || ""}`}>
-                    {c.render ? c.render(r) : cellValue(c, r)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-            {sorted.length === 0 && (
-              <tr>
-                <td colSpan={columns.length} className={`px-4 py-10 text-center text-sm ${t.textFaint}`}>
-                  No rows match “{query}”
-                </td>
-              </tr>
-            )}
-          </tbody>
-          {hasTotals && sorted.length > 0 && (
-            <tfoot>
-              <tr className={`${t.theadBg} border-t ${t.border}`}>
-                {columns.map((c, idx) => (
-                  <td key={c.key} className={`px-4 py-3 text-sm font-semibold ${t.text} whitespace-nowrap`}>
-                    {idx === 0 ? "Total" : c.total ? (c.money ? money(totals[c.key]) : totals[c.key].toLocaleString()) : ""}
-                  </td>
-                ))}
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-    </Card>
-  );
-}
-
-// Column definitions for each table view.
 const ASSET_COLUMNS = [
   { key: "name", label: "Asset Name", className: "font-medium" },
   { key: "managedBy", label: "Managed By" },
@@ -525,16 +377,37 @@ const ASSET_COLUMNS = [
   { key: "onboarding", label: "Onboarding", render: (r) => <StatusBadge status={r.onboarding} /> },
   { key: "account", label: "Account Status", render: (r) => <StatusBadge status={r.account} /> },
 ];
+const ASSET_FIELDS = [
+  { key: "name", label: "Asset Name", type: "text", required: true },
+  { key: "managedBy", label: "Managed By", type: "text" },
+  { key: "page", label: "Facebook Page", type: "text" },
+  { key: "portfolio", label: "Business Portfolio", type: "select", options: ["Main BM", "Secondary BM"] },
+  { key: "setup", label: "Setup Date", type: "date" },
+  { key: "cost", label: "Cost ($)", type: "number" },
+  { key: "onboarding", label: "Onboarding", type: "select", options: ["Complete", "Warming Up", "Pending Review"] },
+  { key: "account", label: "Account Status", type: "select", options: ["Active", "In Review"] },
+];
 
 const PAGE_COLUMNS = [
   { key: "name", label: "Page Name", className: "font-medium" },
   { key: "category", label: "Category" },
   { key: "niche", label: "Niche", className: "text-slate-500" },
-  { key: "followers", label: "Followers", numeric: true, total: true, render: (r) => r.followers.toLocaleString() },
+  { key: "followers", label: "Followers", numeric: true, total: true, render: (r) => Number(r.followers || 0).toLocaleString() },
   { key: "created", label: "Created" },
   { key: "rec", label: "Recommendation", render: (r) => <StatusBadge status={r.rec} /> },
   { key: "monetization", label: "Monetization", render: (r) => <StatusBadge status={r.monetization} /> },
   { key: "revenue", label: "Revenue", numeric: true, total: true, money: true, className: "font-medium", render: (r) => money(r.revenue) },
+];
+const PAGE_FIELDS = [
+  { key: "name", label: "Page Name", type: "text", required: true },
+  { key: "category", label: "Category", type: "text" },
+  { key: "niche", label: "Niche", type: "text" },
+  { key: "followers", label: "Followers", type: "number" },
+  { key: "created", label: "Created", type: "date" },
+  { key: "rec", label: "Recommendation", type: "select", options: ["Recommended", "Standard", "In Review"] },
+  { key: "monetization", label: "Monetization", type: "select", options: ["Eligible", "In Review", "Not Eligible"] },
+  { key: "revenue", label: "Revenue ($)", type: "number" },
+  { key: "status", label: "Status", type: "select", options: ["Active", "In Review"] },
 ];
 
 const BUDGET_COLUMNS = [
@@ -543,9 +416,18 @@ const BUDGET_COLUMNS = [
   { key: "unit", label: "Unit Cost", numeric: true, money: true, render: (r) => money(r.unit) },
   { key: "lineTotal", label: "Total Cost", numeric: true, total: true, money: true, className: "font-medium", value: (r) => r.qty * r.unit, render: (r) => money(r.qty * r.unit), csv: (r) => r.qty * r.unit },
   { key: "category", label: "Category" },
-  { key: "paid", label: "Paid", render: (r) => <StatusBadge status={r.paid === "Yes" ? "Active" : "In Review"} />, value: (r) => r.paid },
+  { key: "paid", label: "Paid", render: (r) => <StatusBadge status={r.paid} />, value: (r) => r.paid },
   { key: "supplier", label: "Supplier", className: "text-slate-500" },
   { key: "notes", label: "Notes", className: "text-slate-500" },
+];
+const BUDGET_FIELDS = [
+  { key: "item", label: "Item", type: "text", required: true },
+  { key: "qty", label: "Quantity", type: "number" },
+  { key: "unit", label: "Unit Cost ($)", type: "number" },
+  { key: "category", label: "Category", type: "select", options: ["Setup", "Content", "Tools", "Labor", "Ads"] },
+  { key: "paid", label: "Paid", type: "select", options: ["Yes", "No"] },
+  { key: "supplier", label: "Supplier", type: "text" },
+  { key: "notes", label: "Notes", type: "text" },
 ];
 
 const REVENUE_COLUMNS = [
@@ -555,24 +437,239 @@ const REVENUE_COLUMNS = [
   { key: "expenses", label: "Expenses", numeric: true, total: true, money: true, render: (r) => money(r.expenses) },
   {
     key: "net", label: "Net Profit", numeric: true, total: true, money: true,
-    value: (r) => r.revenue - r.expenses,
-    csv: (r) => r.revenue - r.expenses,
-    render: (r) => {
-      const net = r.revenue - r.expenses;
-      return <span className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{money(net)}</span>;
-    },
+    value: (r) => r.revenue - r.expenses, csv: (r) => r.revenue - r.expenses,
+    render: (r) => { const net = r.revenue - r.expenses; return <span className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{money(net)}</span>; },
   },
   {
     key: "roi", label: "ROI", numeric: true,
     value: (r) => (r.expenses ? ((r.revenue - r.expenses) / r.expenses) * 100 : 0),
     csv: (r) => (r.expenses ? Math.round(((r.revenue - r.expenses) / r.expenses) * 100) : 0),
-    render: (r) => {
-      const net = r.revenue - r.expenses;
-      const roi = r.expenses ? ((net / r.expenses) * 100).toFixed(0) : "-";
-      return <span className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{roi}%</span>;
-    },
+    render: (r) => { const net = r.revenue - r.expenses; const roi = r.expenses ? ((net / r.expenses) * 100).toFixed(0) : "-"; return <span className={net >= 0 ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>{roi}%</span>; },
   },
 ];
+const REVENUE_FIELDS = [
+  { key: "page", label: "Facebook Page", type: "text", required: true },
+  { key: "month", label: "Month", type: "text" },
+  { key: "revenue", label: "Revenue ($)", type: "number" },
+  { key: "expenses", label: "Expenses ($)", type: "number" },
+];
+
+// ---------------------------------------------------------------------------
+// Row add/edit modal
+// ---------------------------------------------------------------------------
+
+function RowFormModal({ open, title, fields, initial, onClose, onSubmit }) {
+  const t = useTheme();
+  const [vals, setVals] = useState({});
+  const [err, setErr] = useState("");
+  const firstRef = useRef(null);
+
+  useEffect(() => {
+    if (open) {
+      const base = {};
+      fields.forEach((f) => {
+        base[f.key] = initial ? initial[f.key] : (f.type === "number" ? "" : f.type === "select" ? f.options[0] : "");
+      });
+      setVals(base);
+      setErr("");
+      const id = setTimeout(() => firstRef.current && firstRef.current.focus(), 30);
+      return () => clearTimeout(id);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const set = (k, v) => setVals((s) => ({ ...s, [k]: v }));
+  const submit = () => {
+    const req = fields.find((f) => f.required && !String(vals[f.key] || "").trim());
+    if (req) { setErr("“" + req.label + "” is required."); return; }
+    const out = {};
+    fields.forEach((f) => { out[f.key] = f.type === "number" ? Number(vals[f.key]) || 0 : vals[f.key]; });
+    if (initial) Object.keys(initial).forEach((k) => { if (!(k in out)) out[k] = initial[k]; });
+    onSubmit(out);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4 bg-black/40 backdrop-blur-sm rg-fade" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className={`w-full max-w-md ${t.cardBg} backdrop-blur-md border ${t.border} rounded-2xl shadow-2xl overflow-hidden rg-pop`}>
+        <div className={`flex items-center justify-between px-5 py-4 border-b ${t.borderLight}`}>
+          <h3 className={`text-sm font-semibold ${t.text}`}>{title}</h3>
+          <button onClick={onClose} className={`w-7 h-7 rounded-lg flex items-center justify-center ${t.textMuted} ${t.hover}`}><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-5 max-h-[60vh] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {fields.map((f, i) => (
+            <div key={f.key} className={f.type === "text" && f.key === "notes" ? "sm:col-span-2" : ""}>
+              <label className={`block text-xs font-medium ${t.textMuted} mb-1.5`}>{f.label}{f.required && <span className="text-red-500"> *</span>}</label>
+              {f.type === "select" ? (
+                <select
+                  ref={i === 0 ? firstRef : null}
+                  value={vals[f.key] ?? ""}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  className={`w-full px-3 py-2 rounded-xl border ${t.inputBorder} text-sm ${t.inputBg} ${t.text} focus:outline-none focus:ring-2 ${t.accentRing}`}
+                >
+                  {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              ) : (
+                <input
+                  ref={i === 0 ? firstRef : null}
+                  type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                  value={vals[f.key] ?? ""}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+                  className={`w-full px-3 py-2 rounded-xl border ${t.inputBorder} text-sm ${t.inputBg} ${t.text} focus:outline-none focus:ring-2 ${t.accentRing}`}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+        {err && <p className="px-5 -mt-1 pb-1 text-xs text-red-500">{err}</p>}
+        <div className={`flex items-center justify-end gap-2 px-5 py-4 border-t ${t.borderLight}`}>
+          <button onClick={onClose} className={`px-4 py-2 rounded-xl border ${t.border} text-sm font-medium ${t.textMuted} ${t.hover}`}>Cancel</button>
+          <button onClick={submit} className={`px-4 py-2 rounded-xl ${t.accentSolid} ${t.accentSolidHover} text-white text-sm font-medium shadow-sm`}>{initial ? "Save changes" : "Add"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Generic sortable / filterable / editable / exportable table
+// ---------------------------------------------------------------------------
+
+function DataTable({ title, subtitle, columns, rows, fields, addLabel, onAdd, onSave, onDelete }) {
+  const t = useTheme();
+  const { query, setQuery } = useQuery();
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editIndex, setEditIndex] = useState(null);
+  const editable = !!fields;
+
+  const tokens = useMemo(() => parseQuery(query), [query]);
+  const indexed = useMemo(() => rows.map((row, __i) => ({ row, __i })), [rows]);
+  const filtered = useMemo(() => indexed.filter((x) => matchRow(x.row, tokens, columns)), [indexed, tokens, columns]);
+
+  const sorted = useMemo(() => {
+    if (!sortKey) return filtered;
+    const col = columns.find((c) => c.key === sortKey);
+    if (!col) return filtered;
+    const arr = [...filtered].sort((a, b) => {
+      const av = cellValue(col, a.row), bv = cellValue(col, b.row);
+      return col.numeric ? Number(av) - Number(bv) : String(av).localeCompare(String(bv));
+    });
+    if (sortDir === "desc") arr.reverse();
+    return arr;
+  }, [filtered, sortKey, sortDir, columns]);
+
+  const totals = useMemo(() => {
+    const out = {};
+    columns.forEach((c) => { if (c.total) out[c.key] = sorted.reduce((s, x) => s + (Number(cellValue(c, x.row)) || 0), 0); });
+    return out;
+  }, [sorted, columns]);
+
+  const moneyCols = columns.filter((c) => c.total && c.money);
+  const hasTotals = Object.keys(totals).length > 0;
+  const colCount = columns.length + (editable ? 1 : 0);
+
+  const toggleSort = (col) => {
+    if (col.sortable === false) return;
+    if (sortKey === col.key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(col.key); setSortDir("asc"); }
+  };
+
+  const openAdd = () => { setEditIndex(null); setFormOpen(true); };
+  const openEdit = (i) => { setEditIndex(i); setFormOpen(true); };
+  const submitForm = (row) => {
+    if (editIndex == null) onAdd && onAdd(row);
+    else onSave && onSave(editIndex, row);
+    setFormOpen(false);
+  };
+  const remove = (i, label) => { if (window.confirm("Delete this row" + (label ? ' — "' + label + '"' : "") + "?")) onDelete && onDelete(i); };
+
+  return (
+    <Card className="overflow-hidden">
+      <div className={`p-5 flex flex-wrap items-center justify-between gap-3 border-b ${t.borderLight}`}>
+        <SectionHeader title={title} subtitle={subtitle} />
+        <div className="flex items-center gap-2">
+          <button onClick={() => downloadCSV(title, columns, sorted.map((x) => x.row))} className={`inline-flex items-center gap-1.5 border ${t.border} ${t.hover} ${t.textMuted} text-sm font-medium px-3 py-2 rounded-xl transition-colors`} title="Export current view to CSV">
+            <Download className="w-4 h-4" /> CSV
+          </button>
+          {editable && addLabel && (
+            <button onClick={openAdd} className={`inline-flex items-center gap-1.5 ${t.accentSolid} ${t.accentSolidHover} text-white text-sm font-medium px-4 py-2 rounded-xl shadow-sm transition-colors`}>
+              <Plus className="w-4 h-4" /> {addLabel}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className={`px-5 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs ${t.textMuted} ${t.theadBg} border-b ${t.borderLight}`}>
+        <span><b className={t.text}>{sorted.length}</b> of {rows.length} rows</span>
+        {moneyCols.map((c) => (<span key={c.key}>{c.label}: <b className={t.text}>{money(totals[c.key] || 0)}</b></span>))}
+        {query && (<button onClick={() => setQuery("")} className={`inline-flex items-center gap-1 ${t.accentTextSolid} font-medium`}><X className="w-3 h-3" /> clear filter</button>)}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className={t.theadBg}>
+            <tr>
+              {columns.map((c) => (
+                <th key={c.key} onClick={() => toggleSort(c)} className={`text-left text-xs font-semibold ${t.textMuted} uppercase tracking-wide px-4 py-3 whitespace-nowrap ${c.sortable === false ? "" : "cursor-pointer select-none " + t.hover}`}>
+                  <span className="inline-flex items-center gap-1">{c.label}{sortKey === c.key ? (sortDir === "asc" ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />) : null}</span>
+                </th>
+              ))}
+              {editable && <th className={`px-4 py-3 text-right text-xs font-semibold ${t.textMuted} uppercase tracking-wide`}>Edit</th>}
+            </tr>
+          </thead>
+          <tbody className={`divide-y ${t.borderLight}`}>
+            {sorted.map((x) => (
+              <tr key={x.__i} className={`${t.hover} transition-colors group`}>
+                {columns.map((c) => (
+                  <td key={c.key} className={`px-4 py-3 text-sm ${t.text} whitespace-nowrap ${c.className || ""}`}>{c.render ? c.render(x.row) : cellValue(c, x.row)}</td>
+                ))}
+                {editable && (
+                  <td className="px-4 py-3 whitespace-nowrap text-right">
+                    <div className="inline-flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => openEdit(x.__i)} title="Edit" className={`w-7 h-7 rounded-lg flex items-center justify-center ${t.textMuted} ${t.hover}`}><Pencil className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => remove(x.__i, x.row.name || x.row.item || x.row.page)} title="Delete" className={`w-7 h-7 rounded-lg flex items-center justify-center text-red-500 ${t.hover}`}><Trash2 className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </td>
+                )}
+              </tr>
+            ))}
+            {sorted.length === 0 && (
+              <tr><td colSpan={colCount} className={`px-4 py-12 text-center text-sm ${t.textFaint}`}>
+                {rows.length === 0 ? "No rows yet — use the Add button to enter your data." : `No rows match “${query}”.`}
+              </td></tr>
+            )}
+          </tbody>
+          {hasTotals && sorted.length > 0 && (
+            <tfoot>
+              <tr className={`${t.theadBg} border-t ${t.border}`}>
+                {columns.map((c, idx) => (
+                  <td key={c.key} className={`px-4 py-3 text-sm font-semibold ${t.text} whitespace-nowrap`}>
+                    {idx === 0 ? "Total" : c.total ? (c.money ? money(totals[c.key]) : totals[c.key].toLocaleString()) : ""}
+                  </td>
+                ))}
+                {editable && <td />}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      {editable && (
+        <RowFormModal
+          open={formOpen}
+          title={editIndex == null ? (addLabel || "Add row") : "Edit row"}
+          fields={fields}
+          initial={editIndex == null ? null : rows[editIndex]}
+          onClose={() => setFormOpen(false)}
+          onSubmit={submitForm}
+        />
+      )}
+    </Card>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Views
@@ -580,20 +677,35 @@ const REVENUE_COLUMNS = [
 
 function DashboardView() {
   const t = useTheme();
-  const totalInvestment = ASSETS.reduce((s, a) => s + a.cost, 0) + BUDGET.reduce((s, b) => s + b.qty * b.unit, 0);
-  const totalRevenue = PAGES.reduce((s, p) => s + p.revenue, 0);
-  const netProfit = totalRevenue - REVENUE_TABLE.reduce((s, r) => s + r.expenses, 0);
+  const { data } = useData();
+  const { go } = useNav();
+
+  const totalInvestment = data.assets.reduce((s, a) => s + Number(a.cost || 0), 0) + data.budget.reduce((s, b) => s + Number(b.qty || 0) * Number(b.unit || 0), 0);
+  const totalRevenue = data.pages.reduce((s, p) => s + Number(p.revenue || 0), 0);
+  const netProfit = totalRevenue - data.revenue.reduce((s, r) => s + Number(r.expenses || 0), 0);
+  const readyToMonetize = data.pages.filter((p) => p.monetization === "Eligible").length;
+
+  const statusData = useMemo(() => {
+    const counts = {};
+    data.assets.forEach((a) => { const k = a.onboarding === "Complete" ? "Active" : a.onboarding === "Warming Up" ? "Warming Up" : "In Review"; counts[k] = (counts[k] || 0) + 1; });
+    return Object.keys(counts).map((k) => ({ name: k, value: counts[k], color: STATUS_COLORS[k] || "#94a3b8" }));
+  }, [data.assets]);
+
+  const revenueByPage = useMemo(() =>
+    [...data.pages].filter((p) => Number(p.revenue) > 0).sort((a, b) => b.revenue - a.revenue).slice(0, 6)
+      .map((p) => ({ name: p.name.length > 14 ? p.name.slice(0, 13) + "…" : p.name, revenue: Number(p.revenue) })),
+  [data.pages]);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Assets" value={ASSETS.length} icon={Layers} />
-        <StatCard label="Total Pages" value={PAGES.length} icon={Flag} />
-        <StatCard label="Total Investment" value={money(totalInvestment)} icon={DollarSign} delta="+$270 this month" deltaDir="down" />
+        <StatCard label="Total Assets" value={data.assets.length} icon={Layers} />
+        <StatCard label="Total Pages" value={data.pages.length} icon={Flag} />
+        <StatCard label="Total Investment" value={money(totalInvestment)} icon={DollarSign} />
         <StatCard label="Monthly Revenue" value={money(totalRevenue)} icon={TrendingUp} delta="+112% vs last month" deltaDir="up" />
         <StatCard label="Net Profit (MTD)" value={money(netProfit)} icon={Target} />
         <StatCard label="ROI to Date" value="-43%" icon={ArrowUpRight} delta="Trending toward break-even" deltaDir="up" />
-        <StatCard label="Pages Ready to Monetize" value="4" icon={CheckCircle2} />
+        <StatCard label="Pages Ready to Monetize" value={readyToMonetize} icon={CheckCircle2} />
         <StatCard label="Est. Break-even" value="Sep 2026" icon={Clock} />
       </div>
 
@@ -603,14 +715,8 @@ function DashboardView() {
           <ResponsiveContainer width="100%" height={260}>
             <AreaChart data={REVENUE_TREND}>
               <defs>
-                <linearGradient id="inv" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={t.accentHex} stopOpacity={0.28} />
-                  <stop offset="100%" stopColor={t.accentHex} stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#22c55e" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
-                </linearGradient>
+                <linearGradient id="inv" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={t.accentHex} stopOpacity={0.28} /><stop offset="100%" stopColor={t.accentHex} stopOpacity={0} /></linearGradient>
+                <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#22c55e" stopOpacity={0.3} /><stop offset="100%" stopColor="#22c55e" stopOpacity={0} /></linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={t.isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
               <XAxis dataKey="month" tick={{ fontSize: 12, fill: t.isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
@@ -624,22 +730,19 @@ function DashboardView() {
         </Card>
 
         <Card className="p-5">
-          <SectionHeader title="Page Status" />
+          <SectionHeader title="Asset Status" />
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
-              <Pie data={STATUS_OVERVIEW} dataKey="value" nameKey="name" innerRadius={55} outerRadius={80} paddingAngle={3}>
-                {STATUS_OVERVIEW.map((s, i) => <Cell key={i} fill={s.color} />)}
+              <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={80} paddingAngle={3}>
+                {statusData.map((s, i) => <Cell key={i} fill={s.color} />)}
               </Pie>
               <Tooltip />
             </PieChart>
           </ResponsiveContainer>
           <div className="space-y-2 mt-2">
-            {STATUS_OVERVIEW.map((s) => (
+            {statusData.map((s) => (
               <div key={s.name} className="flex items-center justify-between text-sm">
-                <span className={`flex items-center gap-2 ${t.textMuted}`}>
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
-                  {s.name}
-                </span>
+                <span className={`flex items-center gap-2 ${t.textMuted}`}><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />{s.name}</span>
                 <span className={`font-medium ${t.text}`}>{s.value}</span>
               </div>
             ))}
@@ -649,14 +752,14 @@ function DashboardView() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Card className="p-5 lg:col-span-2">
-          <SectionHeader title="ROI Trend" subtitle="Improving as pages reach monetization" />
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={REVENUE_TREND}>
-              <CartesianGrid strokeDasharray="3 3" stroke={t.isDark ? "#1e293b" : "#e2e8f0"} vertical={false} />
-              <XAxis dataKey="month" tick={{ fontSize: 12, fill: t.isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 12, fill: t.isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} />
-              <Tooltip formatter={(v) => `${v}%`} contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} />
-              <Bar dataKey="roi" fill={t.accentHex} radius={[6, 6, 0, 0]} name="ROI %" />
+          <SectionHeader title="Top Pages by Revenue" subtitle="Live from your data" />
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={revenueByPage} layout="vertical" margin={{ left: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={t.isDark ? "#1e293b" : "#e2e8f0"} horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 12, fill: t.isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} tickFormatter={(v) => money(v)} />
+              <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 12, fill: t.isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
+              <Tooltip formatter={(v) => money(v)} contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 13 }} />
+              <Bar dataKey="revenue" fill={t.accentHex} radius={[0, 6, 6, 0]} name="Revenue" />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -664,8 +767,8 @@ function DashboardView() {
         <Card className="p-5">
           <SectionHeader title="Quick Actions" />
           <div className="grid grid-cols-2 gap-3">
-            {["Add Asset", "Add Page", "New Investment", "New Content"].map((label) => (
-              <button key={label} className={`flex flex-col items-start gap-2 p-3 rounded-xl border ${t.border} ${t.hover} transition-colors text-left`}>
+            {[["Add Asset", "assets"], ["Add Page", "pages"], ["New Investment", "budget"], ["New Content", "content"]].map(([label, dest]) => (
+              <button key={label} onClick={() => go(dest)} className={`flex flex-col items-start gap-2 p-3 rounded-xl border ${t.border} ${t.hover} transition-colors text-left`}>
                 <Plus className={`w-4 h-4 ${t.accentTextSolid}`} />
                 <span className={`text-xs font-medium ${t.text}`}>{label}</span>
               </button>
@@ -686,23 +789,42 @@ function DashboardView() {
 }
 
 function AssetsView() {
-  return <DataTable title="Assets" subtitle={`${ASSETS.length} Page assets across the portfolio`} columns={ASSET_COLUMNS} rows={ASSETS} addLabel="Add Asset" />;
+  const { data, addRow, updateRow, deleteRow } = useData();
+  return <DataTable title="Assets" subtitle={`${data.assets.length} Page assets across the portfolio`} columns={ASSET_COLUMNS} rows={data.assets} fields={ASSET_FIELDS} addLabel="Add Asset" onAdd={(r) => addRow("assets", r)} onSave={(i, r) => updateRow("assets", i, r)} onDelete={(i) => deleteRow("assets", i)} />;
 }
 
 function PagesView() {
-  return <DataTable title="Facebook Pages" subtitle={`${PAGES.length} live Pages`} columns={PAGE_COLUMNS} rows={PAGES} addLabel="Add Page" />;
+  const { data, addRow, updateRow, deleteRow } = useData();
+  return <DataTable title="Facebook Pages" subtitle={`${data.pages.length} live Pages`} columns={PAGE_COLUMNS} rows={data.pages} fields={PAGE_FIELDS} addLabel="Add Page" onAdd={(r) => addRow("pages", r)} onSave={(i, r) => updateRow("pages", i, r)} onDelete={(i) => deleteRow("pages", i)} />;
 }
 
 function BudgetView() {
-  const total = BUDGET.reduce((s, b) => s + b.qty * b.unit, 0);
-  return <DataTable title="Budget Tracker" subtitle={`Total spend: ${money(total)}`} columns={BUDGET_COLUMNS} rows={BUDGET} addLabel="Add Item" />;
+  const { data, addRow, updateRow, deleteRow } = useData();
+  const total = data.budget.reduce((s, b) => s + Number(b.qty || 0) * Number(b.unit || 0), 0);
+  return <DataTable title="Budget Tracker" subtitle={`Total spend: ${money(total)}`} columns={BUDGET_COLUMNS} rows={data.budget} fields={BUDGET_FIELDS} addLabel="Add Item" onAdd={(r) => addRow("budget", r)} onSave={(i, r) => updateRow("budget", i, r)} onDelete={(i) => deleteRow("budget", i)} />;
+}
+
+function RevenueView() {
+  const { data, addRow, updateRow, deleteRow } = useData();
+  const totalRev = data.revenue.reduce((s, r) => s + Number(r.revenue || 0), 0);
+  const totalExp = data.revenue.reduce((s, r) => s + Number(r.expenses || 0), 0);
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard label="Revenue (Jul)" value={money(totalRev)} icon={TrendingUp} />
+        <StatCard label="Expenses (Jul)" value={money(totalExp)} icon={Wallet} />
+        <StatCard label="Net Profit (Jul)" value={money(totalRev - totalExp)} icon={Target} />
+      </div>
+      <DataTable title="Revenue by Page" subtitle="Current month" columns={REVENUE_COLUMNS} rows={data.revenue} fields={REVENUE_FIELDS} addLabel="Add Row" onAdd={(r) => addRow("revenue", r)} onSave={(i, r) => updateRow("revenue", i, r)} onDelete={(i) => deleteRow("revenue", i)} />
+    </div>
+  );
 }
 
 function ContentView() {
   const t = useTheme();
   return (
     <div>
-      <SectionHeader title="Content Production" subtitle="Drag-and-drop pipeline across all Pages" action={<PrimaryButton>New Content</PrimaryButton>} />
+      <SectionHeader title="Content Production" subtitle="Pipeline across all Pages" />
       <div className="flex gap-4 overflow-x-auto pb-2">
         {CONTENT_COLUMNS.map((col) => {
           const cards = CONTENT_CARDS.filter((c) => c.col === col);
@@ -717,36 +839,15 @@ function ContentView() {
                   <Card key={i} className="p-3.5 cursor-grab">
                     <p className={`text-sm font-medium ${t.text} mb-1`}>{c.page}</p>
                     <p className={`text-xs ${t.textMuted} mb-3`}>{c.type} &middot; {c.editor}</p>
-                    <div className={`flex items-center justify-between text-xs ${t.textFaint}`}>
-                      <span>{c.publish}</span>
-                      <span className={`font-medium ${t.textMuted}`}>{money(c.cost)}</span>
-                    </div>
+                    <div className={`flex items-center justify-between text-xs ${t.textFaint}`}><span>{c.publish}</span><span className={`font-medium ${t.textMuted}`}>{money(c.cost)}</span></div>
                   </Card>
                 ))}
-                {cards.length === 0 && (
-                  <div className={`border-2 border-dashed ${t.border} rounded-xl h-16 flex items-center justify-center text-xs ${t.textFaint}`}>Empty</div>
-                )}
+                {cards.length === 0 && (<div className={`border-2 border-dashed ${t.border} rounded-xl h-16 flex items-center justify-center text-xs ${t.textFaint}`}>Empty</div>)}
               </div>
             </div>
           );
         })}
       </div>
-    </div>
-  );
-}
-
-function RevenueView() {
-  const t = useTheme();
-  const totalRev = REVENUE_TABLE.reduce((s, r) => s + r.revenue, 0);
-  const totalExp = REVENUE_TABLE.reduce((s, r) => s + r.expenses, 0);
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard label="Revenue (Jul)" value={money(totalRev)} icon={TrendingUp} />
-        <StatCard label="Expenses (Jul)" value={money(totalExp)} icon={Wallet} />
-        <StatCard label="Net Profit (Jul)" value={money(totalRev - totalExp)} icon={Target} />
-      </div>
-      <DataTable title="Revenue by Page" subtitle="Current month" columns={REVENUE_COLUMNS} rows={REVENUE_TABLE} />
     </div>
   );
 }
@@ -761,14 +862,9 @@ function TimelineView() {
         <div className="space-y-6">
           {TIMELINE.map((tl, i) => (
             <div key={i} className="relative flex items-start gap-4">
-              <span className={`absolute -left-6 top-1 w-3.5 h-3.5 rounded-full border-2 ${t.isDark ? "border-slate-900" : "border-white"} ${
-                tl.status === "Done" ? "bg-emerald-500" : tl.status === "In Progress" ? t.accentSolid : "bg-slate-300"
-              }`} />
-              <div className="flex-1 flex items-center justify-between">
-                <div>
-                  <p className={`text-sm font-medium ${t.text}`}>{tl.milestone}</p>
-                  <p className={`text-xs ${t.textMuted} mt-0.5`}>Target: {tl.target}</p>
-                </div>
+              <span className={`absolute -left-6 top-1 w-3.5 h-3.5 rounded-full border-2 ${t.isDark ? "border-slate-900" : "border-white"} ${tl.status === "Done" ? "bg-emerald-500" : tl.status === "In Progress" ? t.accentSolid : "bg-slate-300"}`} />
+              <div className="flex-1 flex items-center justify-between gap-3">
+                <div><p className={`text-sm font-medium ${t.text}`}>{tl.milestone}</p><p className={`text-xs ${t.textMuted} mt-0.5`}>Target: {tl.target}</p></div>
                 <StatusBadge status={tl.status} />
               </div>
             </div>
@@ -780,7 +876,7 @@ function TimelineView() {
 }
 
 // ---------------------------------------------------------------------------
-// Theme picker
+// Theme picker + command palette
 // ---------------------------------------------------------------------------
 
 function ThemePicker({ isDark, setIsDark, accentKey, setAccentKey }) {
@@ -788,34 +884,17 @@ function ThemePicker({ isDark, setIsDark, accentKey, setAccentKey }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className={`w-9 h-9 rounded-xl border ${t.border} flex items-center justify-center ${t.textMuted} ${t.hover} transition-colors`}
-        title="Theme"
-      >
-        <Palette className="w-4 h-4" />
-      </button>
+      <button onClick={() => setOpen((o) => !o)} className={`w-9 h-9 rounded-xl border ${t.border} flex items-center justify-center ${t.textMuted} ${t.hover} transition-colors`} title="Theme"><Palette className="w-4 h-4" /></button>
       {open && (
-        <div className={`absolute right-0 mt-2 w-56 ${t.cardBg} backdrop-blur-md border ${t.border} rounded-2xl shadow-lg p-4 z-20`}>
+        <div className={`absolute right-0 mt-2 w-56 ${t.cardBg} backdrop-blur-md border ${t.border} rounded-2xl shadow-lg p-4 z-30 rg-pop`}>
           <div className="flex items-center justify-between mb-3">
             <p className={`text-xs font-semibold ${t.textMuted} uppercase tracking-wide`}>Appearance</p>
-            <button
-              onClick={() => setIsDark((d) => !d)}
-              className={`w-7 h-7 rounded-lg flex items-center justify-center border ${t.border} ${t.hover}`}
-            >
-              {isDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
-            </button>
+            <button onClick={() => setIsDark((d) => !d)} className={`w-7 h-7 rounded-lg flex items-center justify-center border ${t.border} ${t.hover}`}>{isDark ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}</button>
           </div>
           <p className={`text-xs font-semibold ${t.textMuted} uppercase tracking-wide mb-2`}>Accent color</p>
           <div className="grid grid-cols-4 gap-2">
             {ACCENTS.map((ac) => (
-              <button
-                key={ac.key}
-                onClick={() => setAccentKey(ac.key)}
-                title={ac.label}
-                className="w-9 h-9 rounded-full flex items-center justify-center border-2 transition-transform hover:scale-110"
-                style={{ backgroundColor: ac.hex, borderColor: accentKey === ac.key ? (t.isDark ? "#f1f5f9" : "#0f172a") : "transparent" }}
-              >
+              <button key={ac.key} onClick={() => setAccentKey(ac.key)} title={ac.label} className="w-9 h-9 rounded-full flex items-center justify-center border-2 transition-transform hover:scale-110" style={{ backgroundColor: ac.hex, borderColor: accentKey === ac.key ? (t.isDark ? "#f1f5f9" : "#0f172a") : "transparent" }}>
                 {accentKey === ac.key && <Check className="w-4 h-4 text-white" strokeWidth={3} />}
               </button>
             ))}
@@ -826,21 +905,13 @@ function ThemePicker({ isDark, setIsDark, accentKey, setAccentKey }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Command palette  (⌘K / Ctrl-K)
-// ---------------------------------------------------------------------------
-
-function CommandPalette({ open, setOpen, active, setActive, isDark, setIsDark, accentKey, setAccentKey }) {
+function CommandPalette({ open, setOpen, setActive, isDark, setIsDark, setAccentKey, resetData }) {
   const t = useTheme();
   const [q, setQ] = useState("");
   const inputRef = useRef(null);
 
   useEffect(() => {
-    if (open) {
-      setQ("");
-      const id = setTimeout(() => inputRef.current && inputRef.current.focus(), 0);
-      return () => clearTimeout(id);
-    }
+    if (open) { setQ(""); const id = setTimeout(() => inputRef.current && inputRef.current.focus(), 0); return () => clearTimeout(id); }
   }, [open]);
 
   if (!open) return null;
@@ -848,23 +919,17 @@ function CommandPalette({ open, setOpen, active, setActive, isDark, setIsDark, a
   const items = [];
   NAV.forEach((n) => items.push({ id: "nav:" + n.id, label: "Go to " + n.label, icon: n.icon, run: () => { setActive(n.id); setOpen(false); } }));
   items.push({ id: "theme", label: isDark ? "Switch to light mode" : "Switch to dark mode", icon: isDark ? Sun : Moon, run: () => { setIsDark((d) => !d); setOpen(false); } });
+  items.push({ id: "reset", label: "Reset to sample data", icon: RotateCcw, run: () => { if (window.confirm("Replace all current data with the original sample data? This clears your edits in this browser.")) resetData(); setOpen(false); } });
   ACCENTS.forEach((a) => items.push({ id: "accent:" + a.key, label: "Accent color: " + a.label, dot: a.hex, run: () => { setAccentKey(a.key); setOpen(false); } }));
 
   const filtered = items.filter((it) => it.label.toLowerCase().includes(q.toLowerCase()));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 px-4 bg-black/40 backdrop-blur-sm" onClick={() => setOpen(false)}>
-      <div onClick={(e) => e.stopPropagation()} className={`w-full max-w-lg ${t.cardBg} backdrop-blur-md border ${t.border} rounded-2xl shadow-2xl overflow-hidden`}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 px-4 bg-black/40 backdrop-blur-sm rg-fade" onClick={() => setOpen(false)}>
+      <div onClick={(e) => e.stopPropagation()} className={`w-full max-w-lg ${t.cardBg} backdrop-blur-md border ${t.border} rounded-2xl shadow-2xl overflow-hidden rg-pop`}>
         <div className={`flex items-center gap-2 px-4 py-3 border-b ${t.borderLight}`}>
           <Search className={`w-4 h-4 ${t.textFaint}`} />
-          <input
-            ref={inputRef}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && filtered[0]) filtered[0].run(); if (e.key === "Escape") setOpen(false); }}
-            placeholder="Jump to a view or change the theme…"
-            className={`flex-1 bg-transparent outline-none text-sm ${t.text}`}
-          />
+          <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && filtered[0]) filtered[0].run(); if (e.key === "Escape") setOpen(false); }} placeholder="Jump to a view, change theme, reset data…" className={`flex-1 bg-transparent outline-none text-sm ${t.text}`} />
           <span className={`text-[10px] ${t.textFaint} border ${t.border} rounded px-1.5 py-0.5`}>ESC</span>
         </div>
         <div className="max-h-80 overflow-y-auto py-2">
@@ -888,6 +953,45 @@ function CommandPalette({ open, setOpen, active, setActive, isDark, setIsDark, a
 function readStored(key, fallback) {
   try { const v = localStorage.getItem(key); return v == null ? fallback : v; } catch (e) { return fallback; }
 }
+function loadData() {
+  try { const raw = localStorage.getItem("rg-data-v1"); if (raw) { const d = JSON.parse(raw); if (d && d.assets && d.pages && d.budget && d.revenue) return d; } } catch (e) {}
+  return { assets: SEED.assets, pages: SEED.pages, budget: SEED.budget, revenue: SEED.revenue };
+}
+
+function NavList({ active, setActive, onNavigate }) {
+  const t = useTheme();
+  return (
+    <nav className="flex-1 px-3 py-4 space-y-1">
+      {NAV.map((item) => {
+        const Icon = item.icon;
+        const isActive = active === item.id;
+        return (
+          <button key={item.id} onClick={() => { setActive(item.id); onNavigate && onNavigate(); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors duration-200 ${isActive ? `${t.accentLightBg} ${t.accentText}` : `${t.textMuted} ${t.hover}`}`}>
+            <Icon className="w-4 h-4" strokeWidth={2} />
+            {item.label}
+            {isActive && <ChevronRight className="w-3.5 h-3.5 ml-auto" />}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function SidebarInner({ active, setActive, onNavigate }) {
+  const t = useTheme();
+  return (
+    <>
+      <div className={`h-16 flex items-center gap-2.5 px-5 border-b ${t.borderLight}`}>
+        <div className={`w-8 h-8 rounded-lg ${t.accentSolid} flex items-center justify-center`}><Flag className="w-4 h-4 text-white" /></div>
+        <div><p className={`text-sm font-semibold ${t.text} leading-none`}>RunGate Cash</p><p className={`text-[11px] ${t.textFaint} leading-none mt-0.5`}>Portfolio Manager</p></div>
+      </div>
+      <NavList active={active} setActive={setActive} onNavigate={onNavigate} />
+      <div className={`p-4 border-t ${t.borderLight}`}>
+        <div className={`rounded-xl ${t.inputBg} p-3.5`}><p className={`text-xs font-medium ${t.text}`}>10 Pages live</p><p className={`text-[11px] ${t.textMuted} mt-0.5`}>Break-even estimated Sep 2026</p></div>
+      </div>
+    </>
+  );
+}
 
 function App() {
   const [active, setActive] = useState("dashboard");
@@ -895,21 +999,27 @@ function App() {
   const [isDark, setIsDark] = useState(() => readStored("rg-dark", "0") === "1");
   const [accentKey, setAccentKey] = useState(() => readStored("rg-accent", "blue"));
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
+  const [data, setData] = useState(() => loadData());
 
-  // Persist appearance choices between visits.
   useEffect(() => { try { localStorage.setItem("rg-dark", isDark ? "1" : "0"); } catch (e) {} }, [isDark]);
   useEffect(() => { try { localStorage.setItem("rg-accent", accentKey); } catch (e) {} }, [accentKey]);
+  useEffect(() => { try { localStorage.setItem("rg-data-v1", JSON.stringify(data)); } catch (e) {} }, [data]);
 
-  // ⌘K / Ctrl-K opens the command palette.
   useEffect(() => {
-    const h = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((o) => !o); }
-    };
+    const h = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((o) => !o); } };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, []);
 
+  const addRow = (ds, row) => setData((d) => ({ ...d, [ds]: [...d[ds], row] }));
+  const updateRow = (ds, idx, row) => setData((d) => ({ ...d, [ds]: d[ds].map((r, i) => (i === idx ? row : r)) }));
+  const deleteRow = (ds, idx) => setData((d) => ({ ...d, [ds]: d[ds].filter((_, i) => i !== idx) }));
+  const resetData = () => setData({ assets: SEED.assets, pages: SEED.pages, budget: SEED.budget, revenue: SEED.revenue });
+
   const t = useMemo(() => buildTokens(isDark, accentKey), [isDark, accentKey]);
+  const dataApi = useMemo(() => ({ data, addRow, updateRow, deleteRow, resetData }), [data]);
+  const navApi = useMemo(() => ({ go: setActive }), []);
 
   const view = useMemo(() => {
     switch (active) {
@@ -921,101 +1031,57 @@ function App() {
       case "timeline": return <TimelineView />;
       default: return <DashboardView />;
     }
-  }, [active, isDark, accentKey]);
+  }, [active]);
 
   const activeLabel = NAV.find((n) => n.id === active)?.label ?? "Dashboard";
 
   return (
     <ThemeContext.Provider value={t}>
      <QueryContext.Provider value={{ query, setQuery }}>
-      <div className={`min-h-screen ${t.page} flex ${t.text}`} style={{ fontFamily: "Inter, ui-sans-serif, system-ui" }}>
-        {/* Sidebar */}
-        <aside className={`w-60 flex-shrink-0 ${t.sidebarBg} border-r ${t.border} flex flex-col sticky top-0 h-screen`}>
-          <div className={`h-16 flex items-center gap-2.5 px-5 border-b ${t.borderLight}`}>
-            <div className={`w-8 h-8 rounded-lg ${t.accentSolid} flex items-center justify-center`}>
-              <Flag className="w-4.5 h-4.5 text-white" />
-            </div>
-            <div>
-              <p className={`text-sm font-semibold ${t.text} leading-none`}>RunGate Cash</p>
-              <p className={`text-[11px] ${t.textFaint} leading-none mt-0.5`}>Portfolio Manager</p>
-            </div>
-          </div>
-          <nav className="flex-1 px-3 py-4 space-y-1">
-            {NAV.map((item) => {
-              const Icon = item.icon;
-              const isActive = active === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActive(item.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors duration-200 ${
-                    isActive ? `${t.accentLightBg} ${t.accentText}` : `${t.textMuted} ${t.hover}`
-                  }`}
-                >
-                  <Icon className="w-4 h-4" strokeWidth={2} />
-                  {item.label}
-                  {isActive && <ChevronRight className="w-3.5 h-3.5 ml-auto" />}
-                </button>
-              );
-            })}
-          </nav>
-          <div className={`p-4 border-t ${t.borderLight}`}>
-            <div className={`rounded-xl ${t.inputBg} p-3.5`}>
-              <p className={`text-xs font-medium ${t.text}`}>10 Pages live</p>
-              <p className={`text-[11px] ${t.textMuted} mt-0.5`}>Break-even estimated Sep 2026</p>
-            </div>
-          </div>
-        </aside>
+      <DataContext.Provider value={dataApi}>
+       <NavContext.Provider value={navApi}>
+        <div className={`min-h-screen ${t.page} flex ${t.text}`} style={{ fontFamily: "Inter, ui-sans-serif, system-ui" }}>
+          {/* Desktop sidebar */}
+          <aside className={`hidden md:flex w-60 flex-shrink-0 ${t.sidebarBg} border-r ${t.border} flex-col sticky top-0 h-screen`}>
+            <SidebarInner active={active} setActive={setActive} />
+          </aside>
 
-        {/* Main */}
-        <div className="flex-1 min-w-0">
-          <header className={`h-16 ${t.headerBg} backdrop-blur-sm border-b ${t.border} flex items-center justify-between px-6 sticky top-0 z-10`}>
-            <div>
-              <p className={`text-xs ${t.textFaint}`}>Pages</p>
-              <h1 className={`text-base font-semibold ${t.text}`}>{activeLabel}</h1>
+          {/* Mobile drawer */}
+          {mobileNav && (
+            <div className="fixed inset-0 z-50 md:hidden">
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm rg-fade" onClick={() => setMobileNav(false)} />
+              <aside className={`absolute left-0 top-0 h-full w-64 ${t.sidebarBg} border-r ${t.border} flex flex-col rg-slide`}>
+                <SidebarInner active={active} setActive={setActive} onNavigate={() => setMobileNav(false)} />
+              </aside>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="relative hidden sm:block">
-                <Search className={`w-4 h-4 ${t.textFaint} absolute left-3 top-1/2 -translate-y-1/2`} />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search or filter, e.g. revenue > 100"
-                  title="Type to filter the current table. Supports field:value and >, <, >=, <= (e.g. status:Active, followers>3000)."
-                  className={`w-72 pl-9 pr-8 py-2 rounded-xl border ${t.border} text-sm ${t.inputBg} focus:outline-none focus:ring-2 ${t.accentRing} transition-all ${t.text}`}
-                />
-                {query && (
-                  <button onClick={() => setQuery("")} title="Clear" className={`absolute right-2.5 top-1/2 -translate-y-1/2 ${t.textFaint} hover:${t.textMuted}`}>
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+          )}
+
+          <div className="flex-1 min-w-0">
+            <header className={`h-16 ${t.headerBg} backdrop-blur-sm border-b ${t.border} flex items-center justify-between px-4 sm:px-6 sticky top-0 z-20 gap-2`}>
+              <div className="flex items-center gap-2 min-w-0">
+                <button onClick={() => setMobileNav(true)} className={`md:hidden w-9 h-9 rounded-xl border ${t.border} flex items-center justify-center ${t.textMuted} ${t.hover}`}><Menu className="w-4 h-4" /></button>
+                <div className="min-w-0">
+                  <p className={`text-xs ${t.textFaint} hidden sm:block`}>Pages</p>
+                  <h1 className={`text-base font-semibold ${t.text} truncate`}>{activeLabel}</h1>
+                </div>
               </div>
-              <button
-                onClick={() => setPaletteOpen(true)}
-                title="Command palette (⌘K)"
-                className={`hidden sm:flex items-center gap-1.5 h-9 px-3 rounded-xl border ${t.border} ${t.textMuted} ${t.hover} transition-colors text-xs font-medium`}
-              >
-                <span className="text-sm leading-none">⌘</span>K
-              </button>
-              <button className={`w-9 h-9 rounded-xl border ${t.border} flex items-center justify-center ${t.textMuted} ${t.hover} transition-colors`}>
-                <Users className="w-4 h-4" />
-              </button>
-              <ThemePicker isDark={isDark} setIsDark={setIsDark} accentKey={accentKey} setAccentKey={setAccentKey} />
-            </div>
-          </header>
-          <main className="p-6">{view}</main>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="relative hidden sm:block">
+                  <Search className={`w-4 h-4 ${t.textFaint} absolute left-3 top-1/2 -translate-y-1/2`} />
+                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search or filter, e.g. revenue > 100" title="Filter the current table. Supports field:value and >, <, >=, <=" className={`w-44 lg:w-72 pl-9 pr-8 py-2 rounded-xl border ${t.border} text-sm ${t.inputBg} focus:outline-none focus:ring-2 ${t.accentRing} transition-all ${t.text}`} />
+                  {query && <button onClick={() => setQuery("")} title="Clear" className={`absolute right-2.5 top-1/2 -translate-y-1/2 ${t.textFaint}`}><X className="w-3.5 h-3.5" /></button>}
+                </div>
+                <button onClick={() => setPaletteOpen(true)} title="Command palette (⌘K)" className={`hidden sm:flex items-center gap-1.5 h-9 px-3 rounded-xl border ${t.border} ${t.textMuted} ${t.hover} transition-colors text-xs font-medium`}><span className="text-sm leading-none">⌘</span>K</button>
+                <ThemePicker isDark={isDark} setIsDark={setIsDark} accentKey={accentKey} setAccentKey={setAccentKey} />
+              </div>
+            </header>
+            <main className="p-4 sm:p-6">{view}</main>
+          </div>
         </div>
-      </div>
-      <CommandPalette
-        open={paletteOpen}
-        setOpen={setPaletteOpen}
-        active={active}
-        setActive={setActive}
-        isDark={isDark}
-        setIsDark={setIsDark}
-        accentKey={accentKey}
-        setAccentKey={setAccentKey}
-      />
+
+        <CommandPalette open={paletteOpen} setOpen={setPaletteOpen} setActive={setActive} isDark={isDark} setIsDark={setIsDark} setAccentKey={setAccentKey} resetData={resetData} />
+       </NavContext.Provider>
+      </DataContext.Provider>
      </QueryContext.Provider>
     </ThemeContext.Provider>
   );
@@ -1024,14 +1090,11 @@ function App() {
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
 
-  <!-- Compile the JSX with the CLASSIC runtime (uses the global React.createElement,
-       so no ES `import` is emitted) and run it. -->
+  <!-- Compile the JSX with the CLASSIC runtime (uses the global React.createElement) and run it. -->
   <script>
     (function () {
       var src = document.getElementById("app-src").textContent;
-      var out = Babel.transform(src, {
-        presets: [["react", { runtime: "classic" }]]
-      }).code;
+      var out = Babel.transform(src, { presets: [["react", { runtime: "classic" }]] }).code;
       var s = document.createElement("script");
       s.textContent = out;
       document.body.appendChild(s);
